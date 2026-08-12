@@ -13,17 +13,21 @@ class ConfirmedTrackFilter:
     """Expose smoothed, repeatedly observed tracks without mutating raw tracks."""
 
     def __init__(self, confirmation_age=3, position_alpha=0.35,
-                 static_speed_threshold=0.25):
+                 static_speed_threshold=0.25, moving_confirmation_age=1):
         if confirmation_age < 1:
             raise ValueError("confirmation_age must be at least one")
         if not 0.0 < position_alpha <= 1.0:
             raise ValueError("position_alpha must be in (0, 1]")
         if static_speed_threshold < 0.0:
             raise ValueError("static_speed_threshold must be non-negative")
+        if moving_confirmation_age < 1:
+            raise ValueError("moving_confirmation_age must be at least one")
         self.confirmation_age = int(confirmation_age)
         self.position_alpha = float(position_alpha)
         self.static_speed_threshold = float(static_speed_threshold)
+        self.moving_confirmation_age = int(moving_confirmation_age)
         self._positions = {}
+        self._moving_observations = {}
 
     def update(self, raw_tracks):
         """Return fresh confirmed track copies with EMA-smoothed centers.
@@ -52,7 +56,14 @@ class ConfirmedTrackFilter:
                 continue
 
             velocity = raw_track["velocity"].clone()
-            if torch.linalg.norm(velocity) < self.static_speed_threshold:
+            moving_now = torch.linalg.norm(velocity) >= self.static_speed_threshold
+            self._moving_observations[track_id] = (
+                self._moving_observations.get(track_id, 0) + 1 if moving_now else 0)
+            # A static circle fit can jitter by one frame and report a large
+            # apparent velocity.  Predict motion only after consecutive fresh
+            # observations support it; raw laser returns still protect every
+            # trajectory regardless of this classification.
+            if self._moving_observations[track_id] < self.moving_confirmation_age:
                 velocity.zero_()
             track = dict(raw_track)
             track["position"] = position
@@ -61,4 +72,5 @@ class ConfirmedTrackFilter:
 
         for track_id in set(self._positions) - active_ids:
             del self._positions[track_id]
+            self._moving_observations.pop(track_id, None)
         return confirmed_tracks

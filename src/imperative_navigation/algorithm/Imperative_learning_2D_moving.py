@@ -59,6 +59,14 @@ LIDAR_RANGE = 10.0  # m
 LIDAR_POINTS = 181  # beams, full scan
 LIDAR_SAFE_DISTANCE = ROBOT_RADIUS + SAFETY_MARGIN  # m, surface clearance
 PLANNING_CLEARANCE_MARGIN = 0.15  # m, acceleration response
+# The physical M1 adapter can make these directional: a larger clearance is
+# retained for obstacles in the goal direction, while tight corridors use the
+# actual robot footprint plus a small lateral margin.  Keep the defaults equal
+# to the original isotropic model so the standalone simulator is unchanged.
+FRONT_LIDAR_SAFE_DISTANCE = LIDAR_SAFE_DISTANCE
+FRONT_PLANNING_CLEARANCE_MARGIN = PLANNING_CLEARANCE_MARGIN
+LATERAL_PLANNING_CLEARANCE_MARGIN = PLANNING_CLEARANCE_MARGIN
+FORWARD_CLEARANCE_COSINE = float(torch.cos(torch.tensor(torch.pi / 4.0)))
 LIDAR_ANGLES = torch.arange(LIDAR_POINTS) * 2.0 * torch.pi / LIDAR_POINTS - torch.pi  # rad, beam angles
 
 CLUSTER_GAP = 0.30  # m, cluster separation
@@ -574,6 +582,25 @@ def collision_penalty(distances):
     return torch.relu(LIDAR_SAFE_DISTANCE - distances) ** 2
 
 
+def directional_collision_penalty(distances, forward_cosines):
+    """Penalize front obstacles more than lateral corridor boundaries.
+
+    ``forward_cosines`` is the cosine between a robot-to-obstacle vector and
+    the current robot-to-goal vector.  The configured front clearance applies
+    only inside that forward cone; all other points use the lateral clearance.
+    With the default constants both branches equal the original isotropic
+    collision model.
+    """
+    front_clearance = FRONT_LIDAR_SAFE_DISTANCE + FRONT_PLANNING_CLEARANCE_MARGIN
+    lateral_clearance = LIDAR_SAFE_DISTANCE + LATERAL_PLANNING_CLEARANCE_MARGIN
+    clearance = torch.where(
+        forward_cosines >= FORWARD_CLEARANCE_COSINE,
+        torch.as_tensor(front_clearance, dtype=distances.dtype, device=distances.device),
+        torch.as_tensor(lateral_clearance, dtype=distances.dtype, device=distances.device),
+    )
+    return torch.relu(clearance - distances) ** 2
+
+
 def select_acceleration(robot_position, robot_velocity, tracks, map_points, current_world_points,
                         previous_plan=None, return_plan=False):
     goal_offset = GOAL - robot_position
@@ -631,18 +658,28 @@ def select_acceleration(robot_position, robot_velocity, tracks, map_points, curr
     effort_cost = ACCELERATION_COST * torch.sum(plans ** 2, dim=(1, 2))
     obstacle_cost = torch.zeros(len(plans))
 
+    goal_directions = GOAL - robot_predictions
+    goal_directions /= torch.linalg.norm(goal_directions, dim=2, keepdim=True).clamp_min(1e-6)
+
     if tracks:
         track_predictions = predict_tracks(tracks, PLAN_HORIZON)
-        track_distances = torch.linalg.norm(robot_predictions[:, :, None, :] - track_predictions[None, :, :, :],
-                                            dim=3) - OBSTACLE_RADIUS
-        obstacle_cost += COLLISION_COST * torch.sum(collision_penalty(track_distances - PLANNING_CLEARANCE_MARGIN),
+        track_offsets = track_predictions[None, :, :, :] - robot_predictions[:, :, None, :]
+        track_distances = torch.linalg.norm(track_offsets, dim=3) - OBSTACLE_RADIUS
+        track_directions = track_offsets / torch.linalg.norm(track_offsets, dim=3, keepdim=True).clamp_min(1e-6)
+        track_forward_cosines = torch.sum(track_directions * goal_directions[:, :, None, :], dim=3)
+        obstacle_cost += COLLISION_COST * torch.sum(directional_collision_penalty(track_distances,
+                                                                                    track_forward_cosines),
                                                     dim=(1, 2))
 
     planning_points = torch.cat([map_points, current_world_points]) if len(map_points) else current_world_points
 
     if len(planning_points):
-        point_distances = torch.linalg.norm(robot_predictions[:, :, None, :] - planning_points[None, None, :, :], dim=3)
-        obstacle_cost += COLLISION_COST * torch.sum(collision_penalty(point_distances - PLANNING_CLEARANCE_MARGIN),
+        point_offsets = planning_points[None, None, :, :] - robot_predictions[:, :, None, :]
+        point_distances = torch.linalg.norm(point_offsets, dim=3)
+        point_directions = point_offsets / point_distances[:, :, :, None].clamp_min(1e-6)
+        point_forward_cosines = torch.sum(point_directions * goal_directions[:, :, None, :], dim=3)
+        obstacle_cost += COLLISION_COST * torch.sum(directional_collision_penalty(point_distances,
+                                                                                    point_forward_cosines),
                                                     dim=(1, 2))
 
     wall_distances = torch.stack([robot_predictions[:, :, 0] - ROOM_X_MIN,

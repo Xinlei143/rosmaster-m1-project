@@ -43,3 +43,12 @@ def test_fast_confirmed_track_keeps_motion_prediction():
     output = filter_.update([track(velocity=(0.40, 0.0))])
     assert len(output) == 1
     assert torch.allclose(output[0]["velocity"], torch.tensor([0.40, 0.0]))
+
+
+def test_fast_track_requires_consecutive_motion_before_dynamic_prediction():
+    filter_ = ConfirmedTrackFilter(static_speed_threshold=0.25, moving_confirmation_age=3)
+    for _ in range(2):
+        output = filter_.update([track(velocity=(0.40, 0.0))])
+        assert torch.equal(output[0]["velocity"], torch.zeros(2))
+    output = filter_.update([track(velocity=(0.40, 0.0))])
+    assert torch.allclose(output[0]["velocity"], torch.tensor([0.40, 0.0]))

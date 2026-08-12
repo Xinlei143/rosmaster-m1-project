@@ -29,10 +29,15 @@ from visualization_msgs.msg import Marker, MarkerArray
 from imperative_navigation.algorithm_loader import load_algorithm
 from imperative_navigation.planner_timing import MeasuredPlannerPeriod
 from imperative_navigation.track_stability import ConfirmedTrackFilter
+from imperative_navigation.holonomic_local_planner import choose_velocity, goal_is_dynamically_blocked
 
 
-def configure_planner_robot_clearance(algorithm, robot_radius, safety_margin):
-    """Apply physical geometry and recompute its existing planner derivative.
+def configure_planner_robot_clearance(algorithm, robot_radius, safety_margin,
+                                      front_safety_margin=None,
+                                      lateral_planning_margin=None,
+                                      front_planning_margin=None,
+                                      forward_half_angle_degrees=45.0):
+    """Apply physical geometry and the M1's directional clearance profile.
 
     ``LIDAR_SAFE_DISTANCE`` is the planner's clearance radius used by
     ``collision_penalty``.  It is calculated at module import in the original
@@ -43,6 +48,16 @@ def configure_planner_robot_clearance(algorithm, robot_radius, safety_margin):
     algorithm.ROBOT_RADIUS = float(robot_radius)
     algorithm.SAFETY_MARGIN = float(safety_margin)
     algorithm.LIDAR_SAFE_DISTANCE = algorithm.ROBOT_RADIUS + algorithm.SAFETY_MARGIN
+    if front_safety_margin is None:
+        front_safety_margin = safety_margin
+    algorithm.FRONT_LIDAR_SAFE_DISTANCE = algorithm.ROBOT_RADIUS + float(front_safety_margin)
+    if lateral_planning_margin is None:
+        lateral_planning_margin = algorithm.PLANNING_CLEARANCE_MARGIN
+    if front_planning_margin is None:
+        front_planning_margin = algorithm.PLANNING_CLEARANCE_MARGIN
+    algorithm.LATERAL_PLANNING_CLEARANCE_MARGIN = float(lateral_planning_margin)
+    algorithm.FRONT_PLANNING_CLEARANCE_MARGIN = float(front_planning_margin)
+    algorithm.FORWARD_CLEARANCE_COSINE = math.cos(math.radians(float(forward_half_angle_degrees)))
 
 
 class ImperativeM1Controller(Node):
@@ -51,11 +66,33 @@ class ImperativeM1Controller(Node):
     def __init__(self):
         super().__init__("imperative_m1_controller")
         for name, value in (
-            ("goal_x", 1.0), ("goal_y", 0.0), ("control_period", 0.1),
+            ("goal_x", 1.0), ("goal_y", 0.0), ("goal_tolerance", 0.08),
+            ("control_period", 0.1),
             # Conservative indoor first-test limits.  Increase only after the
             # stop distance and obstacle detection have been validated.
             ("max_speed", 0.18), ("max_acceleration", 0.25),
             ("robot_radius", 0.18), ("safety_margin", 0.18),
+            ("front_safety_margin", 0.18),
+            ("lateral_planning_margin", 0.15), ("front_planning_margin", 0.15),
+            ("forward_obstacle_half_angle", 45.0),
+            # Optional stateful static-obstacle bypass.  The original planner
+            # optimizes each cycle independently, so a symmetric narrow
+            # passage can otherwise make it alternate between left and right.
+            ("static_bypass_enabled", False), ("bypass_trigger_distance", 0.75),
+            ("bypass_lateral_gate", 0.22), ("bypass_side_offset", 0.24),
+            ("bypass_forward_offset", 0.30), ("bypass_release_distance", 0.18),
+            # Static bypass is deliberately executed by a small holonomic
+            # state machine instead of asking the slower learned planner to
+            # rediscover the same side-step on every callback.
+            ("bypass_speed", 0.055), ("bypass_goal_tolerance", 0.06),
+            # 0 selects the wider side from current LiDAR returns; 1/-1 force
+            # left/right only for repeatable diagnostics.
+            ("bypass_preferred_side", 0),
+            ("trajectory_planner_enabled", True),
+            # Four seconds gives an M1 capped at .08 m/s enough preview to
+            # start curving at .7 m instead of braking at the box face.
+            ("trajectory_horizon", 40), ("trajectory_heading_samples", 41),
+            ("trajectory_speed_samples", 4), ("dynamic_obstacle_radius", 0.20),
             ("scan_topic", "/scan"), ("odom_topic", "/odom"),
             ("command_topic", "/imperative/cmd_vel_raw"), ("odom_frame", "odom"),
             ("scan_timeout", 0.50), ("odom_timeout", 0.50),
@@ -66,10 +103,16 @@ class ImperativeM1Controller(Node):
             ("track_confirmation_age", 3),
             ("track_position_alpha", 0.35),
             ("static_track_speed_threshold", 0.25),
+            ("moving_confirmation_age", 3),
             # Zero preserves PyTorch's platform default.  The value can be
             # overridden for on-robot benchmarking without changing planning.
             ("torch_num_threads", 0),
-            ("emergency_stop_distance", 0.45), ("enabled", False),
+            ("emergency_stop_distance", 0.45),
+            # Collision tube half-width for the holonomic emergency check.
+            # Unlike a fixed body-forward cone it works while the M1 moves
+            # sideways around an obstacle.
+            ("emergency_lateral_clearance", 0.12),
+            ("enabled", False),
         ):
             self.declare_parameter(name, value)
 
@@ -83,9 +126,11 @@ class ImperativeM1Controller(Node):
         # walls come from its laser map, so disable those artificial bounds.
         self.algorithm.ROOM_X_MIN = self.algorithm.ROOM_Y_MIN = -1000.0
         self.algorithm.ROOM_X_MAX = self.algorithm.ROOM_Y_MAX = 1000.0
-        self.algorithm.GOAL = torch.tensor([
+        self.final_goal = torch.tensor([
             self.get_parameter("goal_x").value, self.get_parameter("goal_y").value],
             dtype=torch.float32)
+        self.algorithm.GOAL = self.final_goal.clone()
+        self.algorithm.GOAL_TOLERANCE = float(self.get_parameter("goal_tolerance").value)
         self.algorithm.DT = self.period
         self.algorithm.MAX_SPEED = float(self.get_parameter("max_speed").value)
         self.algorithm.MAX_ACCELERATION = float(self.get_parameter("max_acceleration").value)
@@ -100,7 +145,11 @@ class ImperativeM1Controller(Node):
         configure_planner_robot_clearance(
             self.algorithm,
             self.get_parameter("robot_radius").value,
-            self.get_parameter("safety_margin").value)
+            self.get_parameter("safety_margin").value,
+            self.get_parameter("front_safety_margin").value,
+            self.get_parameter("lateral_planning_margin").value,
+            self.get_parameter("front_planning_margin").value,
+            self.get_parameter("forward_obstacle_half_angle").value)
 
         # Sensor callbacks may run while planning; the timer callback remains
         # mutually exclusive so two planner cycles can never overlap.
@@ -132,18 +181,30 @@ class ImperativeM1Controller(Node):
         self.yaw = 0.0
         self.velocity_world = torch.zeros(2)
         self.map_points = torch.empty(0, 2)
+        self.bypass_goal = None
+        self.bypass_obstacle = None
+        self.bypass_side = None
+        self.bypass_forward = None
+        self.bypass_lateral = None
+        self.bypass_lane_goal = None
+        self.bypass_pass_goal = None
+        self.bypass_phase = None
         self.tracks, self.track_histories, self.dynamic_track_ids = [], {}, set()
         self.planning_tracks = []
         self.track_filter = ConfirmedTrackFilter(
             self.get_parameter("track_confirmation_age").value,
             self.get_parameter("track_position_alpha").value,
-            self.get_parameter("static_track_speed_threshold").value)
+            self.get_parameter("static_track_speed_threshold").value,
+            self.get_parameter("moving_confirmation_age").value)
         self.published_track_ids = set()
         self.next_track_id = 0
         self.previous_plan = None
+        self.trajectory_reference_velocity = torch.zeros(2)
+        self.yielding_for_goal = False
         self.last_warning = ""
         self.last_warning_time = -1
         self.last_debug_time = -1
+        self.last_bypass_log_time = -1
         self.last_dry_run_log_time = -1
         self.scan_hit_count = 0
         self.nearest_range = float("nan")
@@ -276,6 +337,173 @@ class ImperativeM1Controller(Node):
         relative_points = local_points @ rotation.T + translation - position.numpy()
         return torch.from_numpy(relative_points), torch.from_numpy(valid), tf_age
 
+    def motion_emergency_range(self, lidar_points, lidar_hits, motion_direction):
+        """Nearest obstacle in the actual motion-direction collision tube.
+
+        A holonomic M1 can translate sideways without rotating.  Test the
+        projected distance along its measured/planned motion and require the
+        obstacle to lie inside a narrow lateral collision tube; a nearby wall
+        or an already-passed obstacle must not cause a false forward stop.
+        """
+        points = lidar_points[lidar_hits]
+        if not len(points):
+            return float("nan")
+        direction = motion_direction / torch.linalg.norm(motion_direction).clamp_min(1e-6)
+        forward_distances = points @ direction
+        lateral_distances = torch.abs(points[:, 0] * direction[1] - points[:, 1] * direction[0])
+        collision_tube = lateral_distances <= float(self.get_parameter("emergency_lateral_clearance").value)
+        in_front = forward_distances > 0.0
+        collision_ranges = forward_distances[collision_tube & in_front]
+        return float(torch.min(collision_ranges)) if len(collision_ranges) else float("nan")
+
+    def clear_static_bypass(self):
+        """Reset all state owned by a completed/disabled static bypass."""
+        self.bypass_goal = None
+        self.bypass_obstacle = None
+        self.bypass_side = None
+        self.bypass_forward = None
+        self.bypass_lateral = None
+        self.bypass_lane_goal = None
+        self.bypass_pass_goal = None
+        self.bypass_phase = None
+
+    def bypass_velocity(self, position):
+        """Return a bounded world-frame velocity toward the active phase goal."""
+        offset = self.bypass_goal - position
+        distance = float(torch.linalg.norm(offset))
+        if distance < 1e-6:
+            return torch.zeros(2)
+        # Proportional slowdown prevents a 10 Hz command from overshooting a
+        # nearby phase target, while the speed cap makes the physical test
+        # deliberately slower than the normal planner's configured maximum.
+        speed = min(float(self.get_parameter("bypass_speed").value), distance)
+        return speed * offset / distance
+
+    def update_static_bypass_goal(self, position, lidar_points, lidar_hits):
+        """Advance a fixed three-phase holonomic route around one blocker.
+
+        Phases are ``lane`` (pure side step), ``pass`` (move forward beyond
+        the blocker while staying in that lane), then ``exit`` (return to the
+        final goal).  The forward/lateral axes are frozen when the blocker is
+        detected; using a newly computed final-goal axis was the reason the
+        former code could circle a box without ever releasing its subgoal.
+
+        Returns ``True`` while the controller should use the lightweight
+        static-bypass velocity layer.  Raw laser points are still checked by
+        the emergency collision tube before every physical command.
+        """
+        # The roll-out planner supersedes this diagnostic waypoint routine.
+        # Retain it only as an explicit fallback for constrained debugging.
+        if (bool(self.get_parameter("trajectory_planner_enabled").value) or
+                not bool(self.get_parameter("static_bypass_enabled").value)):
+            self.clear_static_bypass()
+            self.algorithm.GOAL = self.final_goal
+            return False
+
+        goal_offset = self.final_goal - position
+        goal_distance = torch.linalg.norm(goal_offset)
+        if goal_distance < 1e-6:
+            self.clear_static_bypass()
+            self.algorithm.GOAL = self.final_goal
+            return False
+        forward = goal_offset / goal_distance
+        lateral = torch.stack((-forward[1], forward[0]))
+
+        if self.bypass_goal is not None:
+            tolerance = float(self.get_parameter("bypass_goal_tolerance").value)
+            if torch.linalg.norm(self.bypass_goal - position) <= tolerance:
+                if self.bypass_phase == "lane":
+                    self.bypass_phase = "pass"
+                    self.bypass_goal = self.bypass_pass_goal
+                    self.get_logger().info(
+                        "Static bypass lane reached; moving forward past the obstacle to (%.2f, %.2f)." %
+                        (self.bypass_goal[0], self.bypass_goal[1]))
+                elif self.bypass_phase == "pass":
+                    # This is the fixed-axis release: the pass target is
+                    # explicitly beyond the obstacle in self.bypass_forward,
+                    # so it cannot rotate away as the M1 translates sideways.
+                    self.bypass_phase = "exit"
+                    self.bypass_goal = self.final_goal.clone()
+                    self.get_logger().info(
+                        "Static bypass obstacle passed; returning directly to final goal (%.2f, %.2f)." %
+                        (self.final_goal[0], self.final_goal[1]))
+                else:
+                    self.get_logger().info("Static bypass complete; final goal reached.")
+                    self.clear_static_bypass()
+                    self.algorithm.GOAL = self.final_goal
+                    return False
+                self.previous_plan = None
+            self.algorithm.GOAL = self.bypass_goal
+            return True
+
+        points = lidar_points[lidar_hits]
+        if not len(points):
+            self.algorithm.GOAL = self.final_goal
+            return False
+        forward_distances = points @ forward
+        lateral_distances = points @ lateral
+        candidate = ((forward_distances >= 0.08) &
+                     (forward_distances <= float(self.get_parameter("bypass_trigger_distance").value)) &
+                     (torch.abs(lateral_distances) <= float(self.get_parameter("bypass_lateral_gate").value)))
+        if not torch.any(candidate):
+            self.algorithm.GOAL = self.final_goal
+            return False
+
+        candidate_indices = torch.where(candidate)[0]
+        nearest_index = candidate_indices[torch.argmin(forward_distances[candidate_indices])]
+        obstacle = position + points[nearest_index]
+        requested_side = int(self.get_parameter("bypass_preferred_side").value)
+        forward_offset = float(self.get_parameter("bypass_forward_offset").value)
+        side_offset = float(self.get_parameter("bypass_side_offset").value)
+        if requested_side:
+            self.bypass_side = 1 if requested_side > 0 else -1
+            side_clearances = None
+        else:
+            # Score each candidate temporary goal by its nearest raw LiDAR
+            # return.  This naturally includes the obstacle, corridor walls,
+            # and any object near the intended passing lane.  The larger score
+            # is the side with more local free space; exact ties choose left
+            # once and stay committed instead of oscillating every callback.
+            side_clearances = {}
+            for side in (-1, 1):
+                candidate_vector = (points[nearest_index] + forward_offset * forward +
+                                    side * side_offset * lateral)
+                side_clearances[side] = float(torch.min(torch.linalg.norm(
+                    points - candidate_vector, dim=1)))
+            self.bypass_side = 1 if side_clearances[1] >= side_clearances[-1] else -1
+        self.bypass_obstacle = obstacle
+        # Preserve these axes for the entire maneuver.  The lane target uses
+        # the robot's current forward coordinate, giving the M1 a genuine
+        # lateral translation first; the pass target then advances along the
+        # same fixed axis beyond the detected obstacle.
+        self.bypass_forward = forward.clone()
+        self.bypass_lateral = lateral.clone()
+        self.bypass_lane_goal = position + self.bypass_side * side_offset * self.bypass_lateral
+        pass_distance = max(forward_offset,
+                            float(self.get_parameter("bypass_release_distance").value))
+        # Keep the *actual entered lane* for the forward pass.  A LaserScan
+        # return is normally a point on the box face/corner, not its centre.
+        # Adding a side offset to that arbitrary point can put the pass target
+        # back toward the box (as happened with lane y=.74 and pass y=.56).
+        # Advancing from lane_goal instead guarantees phase ``pass`` is
+        # parallel to the original goal axis.
+        obstacle_forward_distance = torch.dot(obstacle - position, self.bypass_forward)
+        self.bypass_pass_goal = (self.bypass_lane_goal +
+                                 (obstacle_forward_distance + pass_distance) * self.bypass_forward)
+        self.bypass_phase = "lane"
+        self.bypass_goal = self.bypass_lane_goal
+        self.algorithm.GOAL = self.bypass_goal
+        self.previous_plan = None
+        selection = "forced" if side_clearances is None else (
+            "auto (left=%.2f m, right=%.2f m)" % (side_clearances[1], side_clearances[-1]))
+        self.get_logger().info(
+            "Static bypass started on %s side [%s]: lane=(%.2f, %.2f), pass=(%.2f, %.2f), final=(%.2f, %.2f)." %
+            ("left" if self.bypass_side > 0 else "right", selection,
+             self.bypass_lane_goal[0], self.bypass_lane_goal[1],
+             self.bypass_pass_goal[0], self.bypass_pass_goal[1],
+             self.final_goal[0], self.final_goal[1]))
+        return True
+
     def control_callback(self):
         now = self.get_clock().now().nanoseconds
         # The RDK X5 takes about 0.4--0.5 s for one planner callback.  Use the
@@ -305,13 +533,43 @@ class ImperativeM1Controller(Node):
             self.publish_stop()
             return
 
+        static_bypass_active = self.update_static_bypass_goal(position, lidar_points, lidar_hits)
+        bypass_velocity_world = self.bypass_velocity(position) if static_bypass_active else None
+        # The emergency tube must be aligned with the command about to be
+        # issued.  During a side-step, using last cycle's forward velocity
+        # would incorrectly stop the M1 for the box it is intentionally
+        # passing beside.
+        motion_direction = bypass_velocity_world if static_bypass_active else current_velocity_world
+        if torch.linalg.norm(motion_direction) < 0.02:
+            motion_direction = self.algorithm.GOAL - position
+        self.front_nearest_range = self.motion_emergency_range(
+            lidar_points, lidar_hits, motion_direction)
         emergency_distance = float(self.get_parameter("emergency_stop_distance").value)
-        if self.nearest_range <= emergency_distance:
+        if math.isfinite(self.front_nearest_range) and self.front_nearest_range <= emergency_distance:
             self.warn_throttled(
-                f"Laser return at {self.nearest_range:.2f} m <= emergency limit "
+                f"Laser return in commanded-motion tube at {self.front_nearest_range:.2f} m <= emergency limit "
                 f"{emergency_distance:.2f} m; publishing stop.")
             self.publish_stop()
             self.publish_visualization(position, current_velocity_world)
+            return
+
+        if static_bypass_active:
+            # Do not run the ~0.5 s learned rollout during an intentionally
+            # simple, geometry-fixed static pass.  This keeps the M1's
+            # holonomic side-step responsive at the requested 10 Hz while
+            # retaining fresh laser/odom and the collision-tube stop above.
+            self.publish_body_velocity(bypass_velocity_world, yaw)
+            self.publish_visualization(position, bypass_velocity_world)
+            if (self.last_bypass_log_time < 0 or
+                    now - self.last_bypass_log_time >= 1_000_000_000):
+                self.last_bypass_log_time = now
+                self.get_logger().info(
+                    "Static bypass phase=%s pos=(%.2f, %.2f) target=(%.2f, %.2f) "
+                    "world_cmd=(%.2f, %.2f) tube_nearest=%.2f." % (
+                        self.bypass_phase, position[0], position[1],
+                        self.bypass_goal[0], self.bypass_goal[1],
+                        bypass_velocity_world[0], bypass_velocity_world[1],
+                        self.front_nearest_range))
             return
 
         try:
@@ -345,22 +603,45 @@ class ImperativeM1Controller(Node):
                     self.map_points, world_points, dynamic_centers)
                 profile["update_slam_map"] = time.perf_counter() - stage_start
 
-                if torch.linalg.norm(self.algorithm.GOAL - position) <= self.algorithm.GOAL_TOLERANCE:
+                if torch.linalg.norm(self.final_goal - position) <= self.algorithm.GOAL_TOLERANCE:
                     self.get_logger().info("Goal reached; publishing stop.")
                     self.publish_stop()
                     self.publish_visualization(position, current_velocity_world)
                     return
 
                 stage_start = time.perf_counter()
-                acceleration, self.previous_plan = self.algorithm.select_acceleration(
-                    position, current_velocity_world, self.planning_tracks, self.map_points, world_points,
-                    self.previous_plan, return_plan=True)
-                profile["select_acceleration"] = time.perf_counter() - stage_start
-
-                stage_start = time.perf_counter()
-                _, velocity_world = self.algorithm.step_robot(
-                    position, current_velocity_world, acceleration)
-                profile["step_robot"] = time.perf_counter() - stage_start
+                if bool(self.get_parameter("trajectory_planner_enabled").value):
+                    clearance = (float(self.get_parameter("robot_radius").value) +
+                                 float(self.get_parameter("safety_margin").value))
+                    self.yielding_for_goal = goal_is_dynamically_blocked(
+                        self.final_goal, self.planning_tracks, clearance,
+                        float(self.get_parameter("dynamic_obstacle_radius").value))
+                    velocity_world, trajectory, trajectory_clearance = choose_velocity(
+                        position, current_velocity_world, self.final_goal, world_points,
+                        self.planning_tracks,
+                        max_speed=float(self.get_parameter("max_speed").value),
+                        max_acceleration=float(self.get_parameter("max_acceleration").value),
+                        robot_clearance=clearance,
+                        horizon=int(self.get_parameter("trajectory_horizon").value),
+                        dt=self.period,
+                        heading_samples=int(self.get_parameter("trajectory_heading_samples").value),
+                        speed_samples=int(self.get_parameter("trajectory_speed_samples").value),
+                        dynamic_radius=float(self.get_parameter("dynamic_obstacle_radius").value),
+                        reference_velocity=self.trajectory_reference_velocity,
+                        yielding=self.yielding_for_goal)
+                    self.trajectory_reference_velocity = velocity_world.clone()
+                    self.previous_plan = None
+                    profile["select_acceleration"] = time.perf_counter() - stage_start
+                    profile["step_robot"] = 0.0
+                else:
+                    acceleration, self.previous_plan = self.algorithm.select_acceleration(
+                        position, current_velocity_world, self.planning_tracks, self.map_points, world_points,
+                        self.previous_plan, return_plan=True)
+                    profile["select_acceleration"] = time.perf_counter() - stage_start
+                    stage_start = time.perf_counter()
+                    _, velocity_world = self.algorithm.step_robot(
+                        position, current_velocity_world, acceleration)
+                    profile["step_robot"] = time.perf_counter() - stage_start
         except Exception as error:
             # Planning is never allowed to leave a previous velocity command
             # active, irrespective of whether this is dry-run or live mode.

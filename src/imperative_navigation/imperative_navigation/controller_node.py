@@ -17,6 +17,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 from imperative_navigation.algorithm_loader import load_algorithm
 from imperative_navigation.planner_timing import MeasuredPlannerPeriod
 from imperative_navigation.track_stability import ConfirmedTrackFilter
+from imperative_navigation.holonomic_local_planner import choose_velocity, goal_is_dynamically_blocked
 
 
 class ImperativeController(Node):
@@ -35,9 +36,15 @@ class ImperativeController(Node):
         # values explicitly when performing a sim-to-real comparison.
         self.declare_parameter("robot_radius", 0.15)
         self.declare_parameter("safety_margin", 0.15)
+        self.declare_parameter("trajectory_planner_enabled", True)
+        self.declare_parameter("trajectory_horizon", 40)
+        self.declare_parameter("trajectory_heading_samples", 41)
+        self.declare_parameter("trajectory_speed_samples", 4)
+        self.declare_parameter("dynamic_obstacle_radius", 0.20)
         self.declare_parameter("track_confirmation_age", 3)
         self.declare_parameter("track_position_alpha", 0.35)
         self.declare_parameter("static_track_speed_threshold", 0.25)
+        self.declare_parameter("moving_confirmation_age", 3)
         self.declare_parameter("scan_topic", "/scan")
         self.declare_parameter("odom_topic", "/odom")
         self.declare_parameter("command_topic", "/imperative/cmd_vel")
@@ -95,7 +102,8 @@ class ImperativeController(Node):
         self.track_filter = ConfirmedTrackFilter(
             self.get_parameter("track_confirmation_age").value,
             self.get_parameter("track_position_alpha").value,
-            self.get_parameter("static_track_speed_threshold").value)
+            self.get_parameter("static_track_speed_threshold").value,
+            self.get_parameter("moving_confirmation_age").value)
         self.published_track_ids = set()
         self.next_track_id = 0
         self.track_histories = {}
@@ -115,6 +123,9 @@ class ImperativeController(Node):
                                     if static_boundary_points else torch.empty(0, 2))
         self.map_points = self.static_fallback_map.clone()
         self.previous_plan = None
+        self.trajectory = None
+        self.trajectory_reference_velocity = torch.zeros(2)
+        self.yielding_for_goal = False
         self.scan_is_saturated = False
         self.scan_hit_count = 0
         self.scan_min_range = float("nan")
@@ -122,6 +133,7 @@ class ImperativeController(Node):
         self.last_dynamic_obstacles_time = None
         self.last_debug_log_time = -1
         self.last_saturation_warning_time = -1
+        self.goal_reached_reported = False
         self.create_timer(self.period, self.control_callback)
         self.get_logger().info("Imperative controller ready; waiting for /scan and /odom.")
 
@@ -241,25 +253,52 @@ class ImperativeController(Node):
 
         goal_distance = torch.linalg.norm(self.algorithm.GOAL - self.position)
         if goal_distance <= self.algorithm.GOAL_TOLERANCE:
+            if not self.goal_reached_reported:
+                self.goal_reached_reported = True
+                self.get_logger().info(
+                    "Goal reached: pos=(%.2f, %.2f), distance=%.3f m; publishing stop." %
+                    (self.position[0], self.position[1], goal_distance))
             self.publish_stop()
             self.publish_visualization()
             return
 
-        acceleration, self.previous_plan = self.algorithm.select_acceleration(
-            self.position, self.velocity_world, self.planning_tracks, self.map_points, world_points,
-            self.previous_plan, return_plan=True)
-        # Use the original demo's dynamics helper verbatim for the command
-        # calculation. Gazebo then provides the measured next state via /odom.
-        _, commanded_world_velocity = self.algorithm.step_robot(
-            self.position, self.velocity_world, acceleration)
+        if bool(self.get_parameter("trajectory_planner_enabled").value):
+            obstacle_points = torch.cat((self.static_fallback_map, world_points))
+            clearance = (float(self.get_parameter("robot_radius").value) +
+                         float(self.get_parameter("safety_margin").value))
+            self.yielding_for_goal = goal_is_dynamically_blocked(
+                self.algorithm.GOAL, self.planning_tracks, clearance,
+                float(self.get_parameter("dynamic_obstacle_radius").value))
+            commanded_world_velocity, self.trajectory, _ = choose_velocity(
+                self.position, self.velocity_world, self.algorithm.GOAL, obstacle_points,
+                self.planning_tracks, max_speed=self.max_speed,
+                max_acceleration=float(self.get_parameter("max_acceleration").value),
+                robot_clearance=clearance,
+                horizon=int(self.get_parameter("trajectory_horizon").value), dt=self.period,
+                heading_samples=int(self.get_parameter("trajectory_heading_samples").value),
+                speed_samples=int(self.get_parameter("trajectory_speed_samples").value),
+                dynamic_radius=float(self.get_parameter("dynamic_obstacle_radius").value),
+                reference_velocity=self.trajectory_reference_velocity,
+                yielding=self.yielding_for_goal)
+            self.trajectory_reference_velocity = commanded_world_velocity.clone()
+            self.previous_plan = None
+            acceleration = ((commanded_world_velocity - self.velocity_world) /
+                            self.period)
+        else:
+            acceleration, self.previous_plan = self.algorithm.select_acceleration(
+                self.position, self.velocity_world, self.planning_tracks, self.map_points, world_points,
+                self.previous_plan, return_plan=True)
+            _, commanded_world_velocity = self.algorithm.step_robot(
+                self.position, self.velocity_world, acceleration)
+            self.trajectory = None
         self.publish_body_velocity(commanded_world_velocity)
         if self.last_debug_log_time < 0 or now - self.last_debug_log_time >= 1_000_000_000:
             self.last_debug_log_time = now
             self.get_logger().info(
-                "planner state: pos=(%.2f, %.2f), scan_hits=%d, dynamic_tracks=%d, scan_min=%s, "
+                "planner state: pos=(%.2f, %.2f), scan_hits=%d, confirmed_tracks=%d, moving_tracks=%d, goal_yield=%s, scan_min=%s, "
                 "acc=(%.2f, %.2f), cmd_world=(%.2f, %.2f)" % (
                     self.position[0], self.position[1], self.scan_hit_count,
-                    len(self.planning_tracks),
+                    len(self.planning_tracks), len(self.dynamic_track_ids), self.yielding_for_goal,
                     "n/a" if math.isnan(self.scan_min_range) else f"{self.scan_min_range:.2f}",
                     acceleration[0], acceleration[1],
                     commanded_world_velocity[0], commanded_world_velocity[1]))
@@ -280,7 +319,15 @@ class ImperativeController(Node):
         path = Path()
         path.header.frame_id = "odom"
         path.header.stamp = stamp
-        if self.previous_plan is not None:
+        if self.trajectory is not None:
+            for predicted_position in self.trajectory:
+                pose = PoseStamped()
+                pose.header = path.header
+                pose.pose.position.x = float(predicted_position[0])
+                pose.pose.position.y = float(predicted_position[1])
+                pose.pose.orientation.w = 1.0
+                path.poses.append(pose)
+        elif self.previous_plan is not None:
             predicted_position = self.position.clone()
             predicted_velocity = self.velocity_world.clone()
             for acceleration in self.previous_plan:
