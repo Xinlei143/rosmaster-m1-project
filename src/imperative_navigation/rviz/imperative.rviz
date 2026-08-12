@@ -1,0 +1,46 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 0.7
+      Class: rviz_default_plugins/LaserScan
+      Color: 255; 255; 255
+      Name: Scan
+      Size (m): 0.02
+      Style: Points
+      Topic: /scan
+      Use Fixed Frame: false
+      Value: true
+    - Class: rviz_default_plugins/Path
+      Color: 0; 255; 0
+      Line Style: Lines
+      Line Width: 0.04
+      Name: Planner path
+      Topic: /imperative/planned_path
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Tracked obstacles
+      Topic: /imperative/tracks
+      Value: true
+    - Class: rviz_default_plugins/Odometry
+      Name: M1 odometry
+      Topic: /odom
+      Value: true
+  Global Options:
+    Fixed Frame: odom
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 10
+      Pitch: 0.9
+      Yaw: 0.8
