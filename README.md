@@ -1,4 +1,4 @@
-# Rosmaster M1 Imperative Navigation
+# Rosmaster M1 算法导航项目
 
 这是一个基于 ROS 2 Humble 的 Rosmaster M1 二维导航项目。核心算法使用激光雷达和里程计进行障碍物检测、动态目标跟踪、位姿辅助点地图更新，并通过短时滚动时域选择速度指令。
 
@@ -29,8 +29,13 @@ src/imperative_navigation/
 │   ├── imperative_m1_gazebo.launch.py     # Gazebo + bridge + planner + RViz
 │   ├── imperative_m1_real.launch.py       # 实机规划器
 │   └── imperative_cmd_watchdog.launch.py  # 实机 watchdog
-├── worlds/imperative_m1.sdf               # Gazebo 世界和 M1 模型
+├── worlds/imperative_m1.sdf               # Gazebo 世界、墙体和障碍物
 └── rviz/imperative.rviz                   # RViz 默认配置
+
+src/yahboomcar_description/
+├── urdf/yahboomcar_M1.urdf.xacro          # Yahboom 原厂 M1 描述
+├── urdf/yahboomcar_M1_gazebo.urdf.xacro   # Gazebo 底盘/雷达扩展
+└── meshes/M1Mecanum/                      # M1 外观网格
 ```
 
 ## 2. 算法概览
@@ -81,10 +86,10 @@ pendulum-rl Python 3.10 环境：提供 torch 和 numpy
 cd /home/xinlei/Data/ROS/rosmaster-m1-project
 
 source /opt/ros/humble/setup.bash
-unset PYTHONPATH
+export PYTHONPATH=/usr/lib/python3/dist-packages${PYTHONPATH:+:$PYTHONPATH}
 
 /usr/bin/colcon build \
-  --packages-select imperative_navigation \
+  --packages-select yahboomcar_description imperative_navigation \
   --symlink-install
 ```
 
@@ -139,13 +144,16 @@ ros2 launch imperative_navigation imperative_m1_gazebo.launch.py
 该 launch 会启动：
 
 - Gazebo Sim 6；
+- Yahboom M1 外观模型（由 `yahboomcar_M1_gazebo.urdf.xacro` 生成）；
 - `ros_gz_bridge`；
 - `dynamic_obstacle_mover`；
-- `software_lidar`；
+- Gazebo `gpu_lidar`（或可选的 `software_lidar` 后备）；
 - `imperative_controller`；
 - RViz。
 
 默认目标点为 `(2.5, 1.5)`。Gazebo 世界中的 M1 初始位置约为 `(-2.5, -1.5)`，场景中还包含墙体、静态圆柱和动态圆柱。
+
+仿真模型使用 Yahboom 原厂 M1 STL 作为视觉外观；Gazebo 专用 Xacro 将底盘碰撞替换为简单几何体，以避免复杂 STL 碰撞网格拖慢物理仿真。模型资源路径由 launch 自动加入 Gazebo 环境。
 
 ### 4.2 常用仿真参数
 
@@ -163,14 +171,14 @@ ros2 launch imperative_navigation imperative_m1_gazebo.launch.py \
   robot_radius:=0.18 \
   safety_margin:=0.10
 
-# 仅当 GPU LiDAR 已确认正常时关闭软件 LiDAR
+# WSLg/GPU LiDAR 异常时使用软件雷达后备
 ros2 launch imperative_navigation imperative_m1_gazebo.launch.py \
-  software_lidar:=false
+  software_lidar:=true
 ```
 
-当前 WSLg + Gazebo Sim 6 环境中，GPU LiDAR 可能把所有光束都返回为最小量程 `0.08 m`。因此默认开启 `software_lidar`，它根据 Gazebo 中的墙体和圆柱进行二维射线检测，并发布 `/sim_scan`。
+当前默认使用 Gazebo `gpu_lidar`。其参数与实机 T-MINI PLUS 对齐：`667` 线、约 `0.54°`、`6 Hz`、量程 `0.05–12 m`、距离分辨率 `0.01 m`。如果 WSLg 的 GPU 渲染导致雷达饱和或仿真卡住，设置 `software_lidar:=true`；此时 launch 会关闭模型内的 GPU 雷达，启动同参数的二维软件射线检测，并发布 `/sim_scan`。
 
-软件 LiDAR 是仿真兼容层，不代表实机使用仿真障碍物真值。实机模式不会启动或使用它。
+软件 LiDAR 只用于仿真兼容，不代表实机使用仿真障碍物真值；实机模式不会启动或使用它。
 
 ### 4.3 Gazebo 暂停检查
 
@@ -183,6 +191,27 @@ ros2 topic hz /clock
 
 如果没有消息，请点击 Gazebo 窗口的播放按钮，确保仿真没有暂停。
 
+### 4.4 M1 模型和雷达文件位置
+
+本项目使用以下文件接入 Yahboom M1 模型，同时保留原来的 `imperative_m1.sdf` 世界和算法入口：
+
+```text
+src/yahboomcar_description/urdf/yahboomcar_M1.urdf.xacro
+    原厂 M1 机器人描述
+src/yahboomcar_description/urdf/yahboomcar_M1_gazebo.urdf.xacro
+    Gazebo 底盘插件、里程计和 T-MINI PLUS 雷达扩展
+src/yahboomcar_description/meshes/M1Mecanum/
+    M1 外观 STL 网格
+```
+
+启动命令仍然是：
+
+```bash
+ros2 launch imperative_navigation imperative_m1_gazebo.launch.py
+```
+
+不需要额外的机器人启动文件、`ros2_control` 控制器或速度类型转发节点。
+
 ## 5. ROS 话题和节点
 
 ### 5.1 Gazebo 话题链路
@@ -193,7 +222,7 @@ Gazebo MecanumDrive
 ros_gz_bridge ← /cmd_vel ← imperative_controller
 
 Gazebo OdometryPublisher → /odom → imperative_controller/software_lidar
-Gazebo LiDAR               → /scan
+Gazebo gpu_lidar            → /scan
 software_lidar             → /sim_scan → imperative_controller
 ```
 
@@ -219,11 +248,13 @@ ros2 topic list
 
 ros2 topic info /cmd_vel --verbose
 ros2 topic info /odom --verbose
-ros2 topic info /sim_scan --verbose
+ros2 topic info /scan --verbose
+ros2 topic info /sim_scan --verbose  # 仅 software_lidar:=true 时存在
 
 ros2 topic hz /clock
 ros2 topic hz /odom
-ros2 topic hz /sim_scan
+ros2 topic hz /scan
+ros2 topic hz /sim_scan  # 仅 software_lidar:=true 时存在
 ros2 topic hz /cmd_vel
 
 ros2 topic echo /odom --once
@@ -231,7 +262,7 @@ ros2 topic echo /sim_scan --once
 ros2 topic echo /cmd_vel
 ```
 
-正常仿真中应能看到 `/imperative_controller`、`/parameter_bridge`、`/software_lidar` 和 `/dynamic_obstacle_mover` 等节点。
+正常仿真中应能看到 `/imperative_controller`、`/parameter_bridge` 和 `/dynamic_obstacle_mover`；使用软件雷达后备时还应看到 `/software_lidar`。
 
 ## 6. 小车不动时的排查顺序
 
@@ -306,7 +337,7 @@ ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist \
 Message Filter dropping message ... queue is full
 ```
 
-通常表示激光帧 `m1/base_link/lidar` 到 RViz 固定坐标系 `odom` 的 TF 不完整，主要影响激光显示，不一定会阻止 Gazebo 运动。应先检查：
+通常表示激光帧 `laser_Link` 到 RViz 固定坐标系 `odom` 的 TF 不完整，主要影响激光显示，不一定会阻止 Gazebo 运动。应先检查：
 
 ```bash
 ros2 topic echo /tf --once
