@@ -1,0 +1,203 @@
+Matplotlib created a temporary config/cache directory at /tmp/matplotlib-z0mbyc1i because the default path (/home/xinlei/.config/matplotlib) is not a writable directory; it is highly recommended to set the MPLCONFIGDIR environment variable to a writable directory, in particular to speed up the import of Matplotlib and to better support multiprocessing.
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:131: UserWarning: Glyph 23454 (\N{CJK UNIFIED IDEOGRAPH-5B9E}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:131: UserWarning: Glyph 38469 (\N{CJK UNIFIED IDEOGRAPH-9645}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:131: UserWarning: Glyph 36712 (\N{CJK UNIFIED IDEOGRAPH-8F68}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:131: UserWarning: Glyph 36857 (\N{CJK UNIFIED IDEOGRAPH-8FF9}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:131: UserWarning: Glyph 19982 (\N{CJK UNIFIED IDEOGRAPH-4E0E}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:131: UserWarning: Glyph 35268 (\N{CJK UNIFIED IDEOGRAPH-89C4}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:131: UserWarning: Glyph 21010 (\N{CJK UNIFIED IDEOGRAPH-5212}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:131: UserWarning: Glyph 39044 (\N{CJK UNIFIED IDEOGRAPH-9884}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:131: UserWarning: Glyph 27979 (\N{CJK UNIFIED IDEOGRAPH-6D4B}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:131: UserWarning: Glyph 36335 (\N{CJK UNIFIED IDEOGRAPH-8DEF}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:131: UserWarning: Glyph 24452 (\N{CJK UNIFIED IDEOGRAPH-5F84}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:131: UserWarning: Glyph 30446 (\N{CJK UNIFIED IDEOGRAPH-76EE}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:131: UserWarning: Glyph 26631 (\N{CJK UNIFIED IDEOGRAPH-6807}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:131: UserWarning: Glyph 28857 (\N{CJK UNIFIED IDEOGRAPH-70B9}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:131: UserWarning: Glyph 38556 (\N{CJK UNIFIED IDEOGRAPH-969C}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:131: UserWarning: Glyph 30861 (\N{CJK UNIFIED IDEOGRAPH-788D}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:131: UserWarning: Glyph 29289 (\N{CJK UNIFIED IDEOGRAPH-7269}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:131: UserWarning: Glyph 20013 (\N{CJK UNIFIED IDEOGRAPH-4E2D}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:131: UserWarning: Glyph 24515 (\N{CJK UNIFIED IDEOGRAPH-5FC3}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:132: UserWarning: Glyph 23454 (\N{CJK UNIFIED IDEOGRAPH-5B9E}) missing from current font.
+  fig.savefig(plot_dir / "trajectory.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:132: UserWarning: Glyph 38469 (\N{CJK UNIFIED IDEOGRAPH-9645}) missing from current font.
+  fig.savefig(plot_dir / "trajectory.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:132: UserWarning: Glyph 36712 (\N{CJK UNIFIED IDEOGRAPH-8F68}) missing from current font.
+  fig.savefig(plot_dir / "trajectory.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:132: UserWarning: Glyph 36857 (\N{CJK UNIFIED IDEOGRAPH-8FF9}) missing from current font.
+  fig.savefig(plot_dir / "trajectory.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:132: UserWarning: Glyph 19982 (\N{CJK UNIFIED IDEOGRAPH-4E0E}) missing from current font.
+  fig.savefig(plot_dir / "trajectory.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:132: UserWarning: Glyph 35268 (\N{CJK UNIFIED IDEOGRAPH-89C4}) missing from current font.
+  fig.savefig(plot_dir / "trajectory.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:132: UserWarning: Glyph 21010 (\N{CJK UNIFIED IDEOGRAPH-5212}) missing from current font.
+  fig.savefig(plot_dir / "trajectory.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:132: UserWarning: Glyph 39044 (\N{CJK UNIFIED IDEOGRAPH-9884}) missing from current font.
+  fig.savefig(plot_dir / "trajectory.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:132: UserWarning: Glyph 27979 (\N{CJK UNIFIED IDEOGRAPH-6D4B}) missing from current font.
+  fig.savefig(plot_dir / "trajectory.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:132: UserWarning: Glyph 36335 (\N{CJK UNIFIED IDEOGRAPH-8DEF}) missing from current font.
+  fig.savefig(plot_dir / "trajectory.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:132: UserWarning: Glyph 24452 (\N{CJK UNIFIED IDEOGRAPH-5F84}) missing from current font.
+  fig.savefig(plot_dir / "trajectory.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:132: UserWarning: Glyph 30446 (\N{CJK UNIFIED IDEOGRAPH-76EE}) missing from current font.
+  fig.savefig(plot_dir / "trajectory.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:132: UserWarning: Glyph 26631 (\N{CJK UNIFIED IDEOGRAPH-6807}) missing from current font.
+  fig.savefig(plot_dir / "trajectory.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:132: UserWarning: Glyph 28857 (\N{CJK UNIFIED IDEOGRAPH-70B9}) missing from current font.
+  fig.savefig(plot_dir / "trajectory.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:132: UserWarning: Glyph 38556 (\N{CJK UNIFIED IDEOGRAPH-969C}) missing from current font.
+  fig.savefig(plot_dir / "trajectory.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:132: UserWarning: Glyph 30861 (\N{CJK UNIFIED IDEOGRAPH-788D}) missing from current font.
+  fig.savefig(plot_dir / "trajectory.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:132: UserWarning: Glyph 29289 (\N{CJK UNIFIED IDEOGRAPH-7269}) missing from current font.
+  fig.savefig(plot_dir / "trajectory.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:132: UserWarning: Glyph 20013 (\N{CJK UNIFIED IDEOGRAPH-4E2D}) missing from current font.
+  fig.savefig(plot_dir / "trajectory.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:132: UserWarning: Glyph 24515 (\N{CJK UNIFIED IDEOGRAPH-5FC3}) missing from current font.
+  fig.savefig(plot_dir / "trajectory.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:154: UserWarning: Glyph 36895 (\N{CJK UNIFIED IDEOGRAPH-901F}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:154: UserWarning: Glyph 24230 (\N{CJK UNIFIED IDEOGRAPH-5EA6}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:154: UserWarning: Glyph 35268 (\N{CJK UNIFIED IDEOGRAPH-89C4}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:154: UserWarning: Glyph 21010 (\N{CJK UNIFIED IDEOGRAPH-5212}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:154: UserWarning: Glyph 23454 (\N{CJK UNIFIED IDEOGRAPH-5B9E}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:154: UserWarning: Glyph 38469 (\N{CJK UNIFIED IDEOGRAPH-9645}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:154: UserWarning: Glyph 26102 (\N{CJK UNIFIED IDEOGRAPH-65F6}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:154: UserWarning: Glyph 38388 (\N{CJK UNIFIED IDEOGRAPH-95F4}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:154: UserWarning: Glyph 21152 (\N{CJK UNIFIED IDEOGRAPH-52A0}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:154: UserWarning: Glyph 22120 (\N{CJK UNIFIED IDEOGRAPH-5668}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:154: UserWarning: Glyph 36755 (\N{CJK UNIFIED IDEOGRAPH-8F93}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:154: UserWarning: Glyph 20986 (\N{CJK UNIFIED IDEOGRAPH-51FA}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:154: UserWarning: Glyph 19982 (\N{CJK UNIFIED IDEOGRAPH-4E0E}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:154: UserWarning: Glyph 36816 (\N{CJK UNIFIED IDEOGRAPH-8FD0}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:154: UserWarning: Glyph 21160 (\N{CJK UNIFIED IDEOGRAPH-52A8}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:155: UserWarning: Glyph 36895 (\N{CJK UNIFIED IDEOGRAPH-901F}) missing from current font.
+  fig.savefig(plot_dir / "velocity_acceleration.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:155: UserWarning: Glyph 24230 (\N{CJK UNIFIED IDEOGRAPH-5EA6}) missing from current font.
+  fig.savefig(plot_dir / "velocity_acceleration.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:155: UserWarning: Glyph 35268 (\N{CJK UNIFIED IDEOGRAPH-89C4}) missing from current font.
+  fig.savefig(plot_dir / "velocity_acceleration.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:155: UserWarning: Glyph 21010 (\N{CJK UNIFIED IDEOGRAPH-5212}) missing from current font.
+  fig.savefig(plot_dir / "velocity_acceleration.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:155: UserWarning: Glyph 23454 (\N{CJK UNIFIED IDEOGRAPH-5B9E}) missing from current font.
+  fig.savefig(plot_dir / "velocity_acceleration.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:155: UserWarning: Glyph 38469 (\N{CJK UNIFIED IDEOGRAPH-9645}) missing from current font.
+  fig.savefig(plot_dir / "velocity_acceleration.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:155: UserWarning: Glyph 26102 (\N{CJK UNIFIED IDEOGRAPH-65F6}) missing from current font.
+  fig.savefig(plot_dir / "velocity_acceleration.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:155: UserWarning: Glyph 38388 (\N{CJK UNIFIED IDEOGRAPH-95F4}) missing from current font.
+  fig.savefig(plot_dir / "velocity_acceleration.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:155: UserWarning: Glyph 21152 (\N{CJK UNIFIED IDEOGRAPH-52A0}) missing from current font.
+  fig.savefig(plot_dir / "velocity_acceleration.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:155: UserWarning: Glyph 22120 (\N{CJK UNIFIED IDEOGRAPH-5668}) missing from current font.
+  fig.savefig(plot_dir / "velocity_acceleration.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:155: UserWarning: Glyph 36755 (\N{CJK UNIFIED IDEOGRAPH-8F93}) missing from current font.
+  fig.savefig(plot_dir / "velocity_acceleration.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:155: UserWarning: Glyph 20986 (\N{CJK UNIFIED IDEOGRAPH-51FA}) missing from current font.
+  fig.savefig(plot_dir / "velocity_acceleration.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:155: UserWarning: Glyph 19982 (\N{CJK UNIFIED IDEOGRAPH-4E0E}) missing from current font.
+  fig.savefig(plot_dir / "velocity_acceleration.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:155: UserWarning: Glyph 36816 (\N{CJK UNIFIED IDEOGRAPH-8FD0}) missing from current font.
+  fig.savefig(plot_dir / "velocity_acceleration.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:155: UserWarning: Glyph 21160 (\N{CJK UNIFIED IDEOGRAPH-52A8}) missing from current font.
+  fig.savefig(plot_dir / "velocity_acceleration.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:168: UserWarning: Glyph 26368 (\N{CJK UNIFIED IDEOGRAPH-6700}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:168: UserWarning: Glyph 23567 (\N{CJK UNIFIED IDEOGRAPH-5C0F}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:168: UserWarning: Glyph 26377 (\N{CJK UNIFIED IDEOGRAPH-6709}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:168: UserWarning: Glyph 25928 (\N{CJK UNIFIED IDEOGRAPH-6548}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:168: UserWarning: Glyph 36317 (\N{CJK UNIFIED IDEOGRAPH-8DDD}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:168: UserWarning: Glyph 31163 (\N{CJK UNIFIED IDEOGRAPH-79BB}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:168: UserWarning: Glyph 26102 (\N{CJK UNIFIED IDEOGRAPH-65F6}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:168: UserWarning: Glyph 38388 (\N{CJK UNIFIED IDEOGRAPH-95F4}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:168: UserWarning: Glyph 28857 (\N{CJK UNIFIED IDEOGRAPH-70B9}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:168: UserWarning: Glyph 25968 (\N{CJK UNIFIED IDEOGRAPH-6570}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:168: UserWarning: Glyph 38647 (\N{CJK UNIFIED IDEOGRAPH-96F7}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:168: UserWarning: Glyph 36798 (\N{CJK UNIFIED IDEOGRAPH-8FBE}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:168: UserWarning: Glyph 36755 (\N{CJK UNIFIED IDEOGRAPH-8F93}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:168: UserWarning: Glyph 20837 (\N{CJK UNIFIED IDEOGRAPH-5165}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:168: UserWarning: Glyph 36136 (\N{CJK UNIFIED IDEOGRAPH-8D28}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:168: UserWarning: Glyph 37327 (\N{CJK UNIFIED IDEOGRAPH-91CF}) missing from current font.
+  fig.tight_layout()
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:169: UserWarning: Glyph 26368 (\N{CJK UNIFIED IDEOGRAPH-6700}) missing from current font.
+  fig.savefig(plot_dir / "scan_quality.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:169: UserWarning: Glyph 23567 (\N{CJK UNIFIED IDEOGRAPH-5C0F}) missing from current font.
+  fig.savefig(plot_dir / "scan_quality.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:169: UserWarning: Glyph 26377 (\N{CJK UNIFIED IDEOGRAPH-6709}) missing from current font.
+  fig.savefig(plot_dir / "scan_quality.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:169: UserWarning: Glyph 25928 (\N{CJK UNIFIED IDEOGRAPH-6548}) missing from current font.
+  fig.savefig(plot_dir / "scan_quality.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:169: UserWarning: Glyph 36317 (\N{CJK UNIFIED IDEOGRAPH-8DDD}) missing from current font.
+  fig.savefig(plot_dir / "scan_quality.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:169: UserWarning: Glyph 31163 (\N{CJK UNIFIED IDEOGRAPH-79BB}) missing from current font.
+  fig.savefig(plot_dir / "scan_quality.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:169: UserWarning: Glyph 26102 (\N{CJK UNIFIED IDEOGRAPH-65F6}) missing from current font.
+  fig.savefig(plot_dir / "scan_quality.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:169: UserWarning: Glyph 38388 (\N{CJK UNIFIED IDEOGRAPH-95F4}) missing from current font.
+  fig.savefig(plot_dir / "scan_quality.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:169: UserWarning: Glyph 28857 (\N{CJK UNIFIED IDEOGRAPH-70B9}) missing from current font.
+  fig.savefig(plot_dir / "scan_quality.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:169: UserWarning: Glyph 25968 (\N{CJK UNIFIED IDEOGRAPH-6570}) missing from current font.
+  fig.savefig(plot_dir / "scan_quality.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:169: UserWarning: Glyph 38647 (\N{CJK UNIFIED IDEOGRAPH-96F7}) missing from current font.
+  fig.savefig(plot_dir / "scan_quality.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:169: UserWarning: Glyph 36798 (\N{CJK UNIFIED IDEOGRAPH-8FBE}) missing from current font.
+  fig.savefig(plot_dir / "scan_quality.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:169: UserWarning: Glyph 36755 (\N{CJK UNIFIED IDEOGRAPH-8F93}) missing from current font.
+  fig.savefig(plot_dir / "scan_quality.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:169: UserWarning: Glyph 20837 (\N{CJK UNIFIED IDEOGRAPH-5165}) missing from current font.
+  fig.savefig(plot_dir / "scan_quality.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:169: UserWarning: Glyph 36136 (\N{CJK UNIFIED IDEOGRAPH-8D28}) missing from current font.
+  fig.savefig(plot_dir / "scan_quality.png", dpi=150)
+/home/xinlei/Data/ROS/rosmaster-m1-project/src/imperative_navigation/tools/plot_experiment.py:169: UserWarning: Glyph 37327 (\N{CJK UNIFIED IDEOGRAPH-91CF}) missing from current font.
+  fig.savefig(plot_dir / "scan_quality.png", dpi=150)
+Metrics written to /tmp/imperative-m1-dynamic-full/metrics.json
+Plots written to /tmp/imperative-m1-dynamic-full/plots

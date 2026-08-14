@@ -22,11 +22,13 @@ class DynamicObstacleMover(Node):
         super().__init__("dynamic_obstacle_mover")
         self.declare_parameter("control_period", 0.1)
         self.declare_parameter("random_seed", -1)
+        self.declare_parameter("move_obstacles", True)
         self.declare_parameter("pose_service", "/world/imperative_m1/set_pose")
         self.declare_parameter("obstacle_topic", "/imperative/dynamic_obstacles")
 
         self.period = float(self.get_parameter("control_period").value)
         configured_seed = int(self.get_parameter("random_seed").value)
+        self.move_obstacles = bool(self.get_parameter("move_obstacles").value)
         self.seed = configured_seed if configured_seed >= 0 else time.time_ns() & 0xFFFFFFFF
         self.random = random.Random(self.seed)
         # (name, starting x/y, m/s).  The cylinders begin around the goal, then
@@ -49,7 +51,7 @@ class DynamicObstacleMover(Node):
         self.last_service_warning = -1
         self.create_timer(self.period, self.step)
         self.get_logger().info(
-            f"Random moving-obstacle controller ready (seed={self.seed}).")
+            f"Obstacle controller ready (moving={self.move_obstacles}, seed={self.seed}).")
 
     @staticmethod
     def distance(first, second):
@@ -132,17 +134,18 @@ class DynamicObstacleMover(Node):
             return
 
         for obstacle in self.obstacles:
-            offset_x = obstacle["target"][0] - obstacle["position"][0]
-            offset_y = obstacle["target"][1] - obstacle["position"][1]
-            distance = math.hypot(offset_x, offset_y)
-            travel = obstacle["speed"] * self.period
-            if distance <= travel:
-                obstacle["position"] = list(obstacle["target"])
-                obstacle["target"] = self.sample_target(obstacle["position"])
-                obstacle["approaching"] = False
-            else:
-                obstacle["position"][0] += travel * offset_x / distance
-                obstacle["position"][1] += travel * offset_y / distance
+            if self.move_obstacles:
+                offset_x = obstacle["target"][0] - obstacle["position"][0]
+                offset_y = obstacle["target"][1] - obstacle["position"][1]
+                distance = math.hypot(offset_x, offset_y)
+                travel = obstacle["speed"] * self.period
+                if distance <= travel:
+                    obstacle["position"] = list(obstacle["target"])
+                    obstacle["target"] = self.sample_target(obstacle["position"])
+                    obstacle["approaching"] = False
+                else:
+                    obstacle["position"][0] += travel * offset_x / distance
+                    obstacle["position"][1] += travel * offset_y / distance
             self.send_pose(obstacle)
         self.publish_positions()
 

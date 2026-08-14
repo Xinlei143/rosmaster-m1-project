@@ -1,0 +1,45 @@
+{
+  "run_name": "static-obstacles",
+  "goal": {
+    "x": 2.5,
+    "y": 1.5
+  },
+  "start": {
+    "x": -2.500000000000016,
+    "y": -1.5000000000000002,
+    "yaw": -2.5345278131332042e-14
+  },
+  "termination": {
+    "x": 0.1679679676392871,
+    "y": -2.772907506601574,
+    "yaw": 0.14823146857765396
+  },
+  "final_distance_to_goal": 4.86786523641817,
+  "goal_tolerance": 0.2,
+  "goal_reached": false,
+  "termination_reason": "shutdown_or_timeout",
+  "start_time": 0.1,
+  "end_time": 55.563,
+  "duration_s": 55.463,
+  "row_counts": {
+    "planner": 546,
+    "odom": 1622,
+    "cmd_vel": 550,
+    "scan_beams": 99731,
+    "planned_path_points": 8175,
+    "obstacle_points": 1665,
+    "scan_frames": 551,
+    "planned_path_messages": 545,
+    "obstacle_messages": 555
+  },
+  "metrics_exclude_initial_s": 0.5,
+  "max_actual_speed": 1.293634127576255,
+  "max_actual_acceleration": 12.109347365631848,
+  "odometry_path_length": 26.070761055445637,
+  "max_planner_acceleration": 1.0000000672644482,
+  "max_planner_command_speed": 1.0000000892255922,
+  "planner_actual_speed_rmse": 0.08684460541731176,
+  "scan_frame_count": 551,
+  "scan_min_range": 0.19169437885284424,
+  "scan_max_valid_beams": 181
+}

@@ -4,17 +4,25 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    OpaqueFunction,
+    SetEnvironmentVariable,
+    TimerAction,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def launch_gazebo(context):
     package_share = get_package_share_directory("imperative_navigation")
     ros_gz_sim_share = get_package_share_directory("ros_gz_sim")
-    world = os.path.join(package_share, "worlds", "imperative_m1.sdf")
+    world_name = LaunchConfiguration("world").perform(context)
+    world = os.path.join(package_share, "worlds", world_name)
     server_only = "-s " if LaunchConfiguration("gui").perform(context).lower() == "false" else ""
 
     return [IncludeLaunchDescription(
@@ -28,6 +36,45 @@ def launch_gazebo(context):
 
 def generate_launch_description():
     package_share = get_package_share_directory("imperative_navigation")
+    description_share = get_package_share_directory("yahboomcar_description")
+    description_resource_root = os.path.dirname(description_share)
+    model_file = os.path.join(
+        description_share, "urdf", "yahboomcar_M1_gazebo.urdf.xacro")
+    robot_description = ParameterValue(
+        Command([
+            FindExecutable(name="xacro"), " ", model_file,
+            " enable_gpu_lidar:=",
+            PythonExpression([
+                "'false' if '", LaunchConfiguration("software_lidar"),
+                "' == 'true' else 'true'"]),
+        ]),
+        value_type=str,
+    )
+
+    robot_state_publisher = Node(
+        package="robot_state_publisher",
+        executable="robot_state_publisher",
+        name="robot_state_publisher",
+        output="screen",
+        parameters=[{
+            "use_sim_time": True,
+            "robot_description": robot_description,
+        }],
+    )
+
+    spawn_robot = Node(
+        package="ros_gz_sim",
+        executable="create",
+        name="spawn_m1",
+        output="screen",
+        arguments=[
+            "-topic", "/robot_description",
+            "-name", "m1",
+            "-x", "-2.5",
+            "-y", "-1.5",
+            "-z", "0.01",
+        ],
+    )
 
     bridge = Node(
         package="ros_gz_bridge",
@@ -47,14 +94,15 @@ def generate_launch_description():
         package="imperative_navigation",
         executable="imperative_controller",
         name="imperative_controller",
+        condition=IfCondition(LaunchConfiguration("planner")),
         output="screen",
         parameters=[{
             "use_sim_time": True,
             "command_topic": "/cmd_vel",
             "scan_topic": PythonExpression(["'/sim_scan' if '", LaunchConfiguration("software_lidar"), "' == 'true' else '/scan'"]),
             "odom_topic": "/odom",
-            "goal_x": 2.5,
-            "goal_y": 1.5,
+            "goal_x": LaunchConfiguration("goal_x"),
+            "goal_y": LaunchConfiguration("goal_y"),
             "max_speed": LaunchConfiguration("max_speed"),
             "max_acceleration": LaunchConfiguration("max_acceleration"),
             "robot_radius": LaunchConfiguration("robot_radius"),
@@ -71,7 +119,11 @@ def generate_launch_description():
         executable="dynamic_obstacle_mover",
         name="dynamic_obstacle_mover",
         output="screen",
-        parameters=[{"use_sim_time": True}],
+        parameters=[{
+            "use_sim_time": True,
+            "move_obstacles": LaunchConfiguration("move_obstacles"),
+            "random_seed": LaunchConfiguration("random_seed"),
+        }],
     )
 
     software_lidar = Node(
@@ -91,11 +143,50 @@ def generate_launch_description():
         output="screen",
     )
 
+    experiment_logger = Node(
+        package="imperative_navigation",
+        executable="experiment_logger",
+        name="experiment_logger",
+        condition=IfCondition(LaunchConfiguration("record")),
+        output="screen",
+        parameters=[{
+            "use_sim_time": True,
+            "output_dir": LaunchConfiguration("log_dir"),
+            "run_name": LaunchConfiguration("run_name"),
+            "goal_x": LaunchConfiguration("goal_x"),
+            "goal_y": LaunchConfiguration("goal_y"),
+            "scan_topic": PythonExpression(["'/sim_scan' if '", LaunchConfiguration("software_lidar"), "' == 'true' else '/scan'"]),
+            "command_topic": "/cmd_vel",
+            "odom_topic": "/odom",
+        }],
+    )
+
+    # Gazebo resolves package:// mesh URIs through its model resource path.
+    ignition_resource_path = os.pathsep.join(filter(
+        None, [description_resource_root,
+               os.environ.get("IGN_GAZEBO_RESOURCE_PATH", "")]))
+    gz_resource_path = os.pathsep.join(filter(
+        None, [description_resource_root,
+               os.environ.get("GZ_SIM_RESOURCE_PATH", "")]))
+
     return LaunchDescription([
         DeclareLaunchArgument("rviz", default_value="true", description="Open RViz."),
         DeclareLaunchArgument("gui", default_value="true", description="Open the Gazebo GUI."),
+        DeclareLaunchArgument("planner", default_value="true", description="Start the imperative planner."),
+        DeclareLaunchArgument("world", default_value="imperative_m1.sdf",
+                              description="SDF world filename under the package worlds directory."),
         DeclareLaunchArgument("software_lidar", default_value="true",
                               description="Use WSLg-safe software LaserScan instead of the broken GPU lidar."),
+        DeclareLaunchArgument("record", default_value="false", description="Record experiment CSV files."),
+        DeclareLaunchArgument("log_dir", default_value="/tmp/imperative_m1_experiment",
+                              description="Experiment output directory."),
+        DeclareLaunchArgument("run_name", default_value="gazebo", description="Experiment run label."),
+        DeclareLaunchArgument("goal_x", default_value="2.5", description="Goal X in /odom [m]."),
+        DeclareLaunchArgument("goal_y", default_value="1.5", description="Goal Y in /odom [m]."),
+        DeclareLaunchArgument("move_obstacles", default_value="true",
+                              description="Move the three test obstacles."),
+        DeclareLaunchArgument("random_seed", default_value="-1",
+                              description="Obstacle random seed; -1 uses a time-based seed."),
         DeclareLaunchArgument("max_speed", default_value="1.0", description="Planner speed cap [m/s]."),
         DeclareLaunchArgument("max_acceleration", default_value="1.0",
                               description="Planner acceleration cap [m/s^2]."),
@@ -103,10 +194,15 @@ def generate_launch_description():
                               description="Robot radius used by the planner [m]."),
         DeclareLaunchArgument("safety_margin", default_value="0.15",
                               description="Additional planner clearance [m]."),
+        SetEnvironmentVariable("IGN_GAZEBO_RESOURCE_PATH", ignition_resource_path),
+        SetEnvironmentVariable("GZ_SIM_RESOURCE_PATH", gz_resource_path),
         OpaqueFunction(function=launch_gazebo),
+        robot_state_publisher,
+        TimerAction(period=2.0, actions=[spawn_robot]),
         bridge,
         dynamic_obstacle_mover,
         software_lidar,
         controller,
+        experiment_logger,
         rviz,
     ])

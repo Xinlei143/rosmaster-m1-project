@@ -27,6 +27,7 @@ setup(
             "imperative_controller = imperative_navigation.controller_node:main",
             "imperative_m1_controller = imperative_navigation.m1_controller_node:main",
             "imperative_cmd_watchdog = imperative_navigation.cmd_vel_watchdog_node:main",
+            "experiment_logger = imperative_navigation.experiment_logger:main",
             "dynamic_obstacle_mover = imperative_navigation.dynamic_obstacle_mover:main",
             "software_lidar = imperative_navigation.software_lidar:main",
         ],

@@ -12,9 +12,11 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Float64MultiArray
 from visualization_msgs.msg import Marker, MarkerArray
 
 from imperative_navigation.algorithm_loader import load_algorithm
+from imperative_navigation.debug_protocol import PLANNER_DEBUG_FIELDS
 from imperative_navigation.planner_timing import MeasuredPlannerPeriod
 from imperative_navigation.track_stability import ConfirmedTrackFilter
 
@@ -85,6 +87,8 @@ class ImperativeController(Node):
             Twist, self.get_parameter("command_topic").value, 10)
         self.path_publisher = self.create_publisher(Path, "/imperative/planned_path", 10)
         self.track_publisher = self.create_publisher(MarkerArray, "/imperative/tracks", 10)
+        self.planner_debug_publisher = self.create_publisher(
+            Float64MultiArray, "/imperative/planner_debug", 10)
 
         self.latest_scan = None
         self.position = None
@@ -181,7 +185,11 @@ class ImperativeController(Node):
     def control_callback(self):
         self.algorithm.DT = self.planner_period.next_period(time.monotonic())
         if self.position is None or self.latest_scan is None:
-            self.publish_stop()
+            stop_command = self.publish_stop()
+            if self.position is not None:
+                goal_distance = torch.linalg.norm(self.algorithm.GOAL - self.position)
+                self.publish_planner_debug(
+                    torch.zeros(2), torch.zeros(2), stop_command, goal_distance, stopped=True)
             return
 
         lidar_points, lidar_hits = self.scan_as_world_relative_points()
@@ -201,7 +209,10 @@ class ImperativeController(Node):
         dynamic_feed_is_fresh = self.have_fresh_dynamic_obstacles(now)
         if self.scan_is_saturated and (not len(self.static_fallback_map) or
                                       (needs_dynamic_feed and not dynamic_feed_is_fresh)):
-            self.publish_stop()
+            stop_command = self.publish_stop()
+            goal_distance = torch.linalg.norm(self.algorithm.GOAL - self.position)
+            self.publish_planner_debug(
+                torch.zeros(2), torch.zeros(2), stop_command, goal_distance, stopped=True)
             self.publish_visualization()
             return
         if self.scan_is_saturated:
@@ -241,7 +252,9 @@ class ImperativeController(Node):
 
         goal_distance = torch.linalg.norm(self.algorithm.GOAL - self.position)
         if goal_distance <= self.algorithm.GOAL_TOLERANCE:
-            self.publish_stop()
+            stop_command = self.publish_stop()
+            self.publish_planner_debug(
+                torch.zeros(2), torch.zeros(2), stop_command, goal_distance, stopped=True)
             self.publish_visualization()
             return
 
@@ -252,7 +265,9 @@ class ImperativeController(Node):
         # calculation. Gazebo then provides the measured next state via /odom.
         _, commanded_world_velocity = self.algorithm.step_robot(
             self.position, self.velocity_world, acceleration)
-        self.publish_body_velocity(commanded_world_velocity)
+        command = self.publish_body_velocity(commanded_world_velocity)
+        self.publish_planner_debug(
+            acceleration, commanded_world_velocity, command, goal_distance)
         if self.last_debug_log_time < 0 or now - self.last_debug_log_time >= 1_000_000_000:
             self.last_debug_log_time = now
             self.get_logger().info(
@@ -271,9 +286,42 @@ class ImperativeController(Node):
         command.linear.x = float(cosine * velocity_world[0] + sine * velocity_world[1])
         command.linear.y = float(-sine * velocity_world[0] + cosine * velocity_world[1])
         self.command_publisher.publish(command)
+        return command
 
     def publish_stop(self):
-        self.command_publisher.publish(Twist())
+        command = Twist()
+        self.command_publisher.publish(command)
+        return command
+
+    def publish_planner_debug(self, acceleration, commanded_world_velocity, command,
+                              goal_distance, stopped=False):
+        """Publish exact planner outputs for synchronized experiment logging."""
+        if self.position is None:
+            return
+        values = {
+            "stamp": self.get_clock().now().nanoseconds * 1e-9,
+            "goal_x": float(self.algorithm.GOAL[0]),
+            "goal_y": float(self.algorithm.GOAL[1]),
+            "position_x": float(self.position[0]),
+            "position_y": float(self.position[1]),
+            "yaw": float(self.yaw),
+            "planner_accel_x": float(acceleration[0]),
+            "planner_accel_y": float(acceleration[1]),
+            "command_world_vx": float(commanded_world_velocity[0]),
+            "command_world_vy": float(commanded_world_velocity[1]),
+            "command_body_vx": float(command.linear.x),
+            "command_body_vy": float(command.linear.y),
+            "planner_dt": float(self.algorithm.DT),
+            "scan_hits": float(self.scan_hit_count),
+            "scan_min_range": float(self.scan_min_range),
+            "dynamic_tracks": float(len(self.planning_tracks)),
+            "goal_distance": float(goal_distance),
+            "stopped": float(stopped),
+            "scan_saturated": float(self.scan_is_saturated),
+        }
+        message = Float64MultiArray()
+        message.data = [values[field] for field in PLANNER_DEBUG_FIELDS]
+        self.planner_debug_publisher.publish(message)
 
     def publish_visualization(self):
         stamp = self.get_clock().now().to_msg()

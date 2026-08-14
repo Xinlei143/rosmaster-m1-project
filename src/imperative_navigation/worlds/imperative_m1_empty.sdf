@@ -1,0 +1,71 @@
+<?xml version="1.0" ?>
+<!-- Empty M1-sized room used only for open-loop chassis checks. -->
+<sdf version="1.9">
+  <world name="imperative_m1_empty">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="ignition-gazebo-physics-system"
+            name="ignition::gazebo::systems::Physics"/>
+    <plugin filename="ignition-gazebo-user-commands-system"
+            name="ignition::gazebo::systems::UserCommands"/>
+    <plugin filename="ignition-gazebo-scene-broadcaster-system"
+            name="ignition::gazebo::systems::SceneBroadcaster"/>
+    <plugin filename="ignition-gazebo-sensors-system"
+            name="ignition::gazebo::systems::Sensors">
+      <render_engine>ogre</render_engine>
+    </plugin>
+    <light type="directional" name="sun">
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>12 12 0.1</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>12 12 0.1</size></box></geometry>
+          <material><diffuse>0.75 0.75 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_north">
+      <pose>0 3.25 0.5 0 0 0</pose>
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>8.2 0.1 1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>8.2 0.1 1</size></box></geometry></visual>
+      </link>
+    </model>
+    <model name="wall_south">
+      <pose>0 -3.25 0.5 0 0 0</pose>
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>8.2 0.1 1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>8.2 0.1 1</size></box></geometry></visual>
+      </link>
+    </model>
+    <model name="wall_east">
+      <pose>4.05 0 0.5 0 0 0</pose>
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.1 6.6 1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.1 6.6 1</size></box></geometry></visual>
+      </link>
+    </model>
+    <model name="wall_west">
+      <pose>-4.05 0 0.5 0 0 0</pose>
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.1 6.6 1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.1 6.6 1</size></box></geometry></visual>
+      </link>
+    </model>
+  </world>
+</sdf>
