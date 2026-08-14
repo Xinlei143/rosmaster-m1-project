@@ -29,6 +29,7 @@ setup(
             "imperative_cmd_watchdog = imperative_navigation.cmd_vel_watchdog_node:main",
             "dynamic_obstacle_mover = imperative_navigation.dynamic_obstacle_mover:main",
             "software_lidar = imperative_navigation.software_lidar:main",
+            "avoidance_performance_recorder = imperative_navigation.avoidance_performance_recorder:main",
         ],
     },
 )
