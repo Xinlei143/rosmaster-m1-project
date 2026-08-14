@@ -2,8 +2,12 @@
 <!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
      Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
      For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
-<robot name="yahboomcar_M1" xmlns:xacro="http://ros.org/wiki/xacro">
+<robot name="yahboomcar_M1"
+       xmlns:xacro="http://ros.org/wiki/xacro"
+       xmlns:ignition="http://ignitionrobotics.org/schema">
   <xacro:arg name="enable_gpu_lidar" default="true"/>
+  <xacro:arg name="enable_contact_sensors" default="false"/>
+  <xacro:arg name="enable_force_torque_sensors" default="false"/>
   <link name="imu_link"/>
   <link
     name="base_link">
@@ -75,9 +79,7 @@
       </material>
     </visual>
     <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="1.5708 0 0" />
+      <origin xyz="0 0 0" rpy="1.5708 0 0" />
       <geometry>
         <cylinder radius="0.04" length="0.035"/>
       </geometry>
@@ -87,7 +89,7 @@
     name="le_fr_joint"
     type="continuous">
     <origin
-      xyz="0.092963 0.08425 0.012478"
+      xyz="0.093 0.08425 0.0125"
       rpy="0 0 0" />
     <parent
       link="base_link" />
@@ -130,9 +132,7 @@
       </material>
     </visual>
     <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="1.5708 0 0" />
+      <origin xyz="0 0 0" rpy="1.5708 0 0" />
       <geometry>
         <cylinder radius="0.04" length="0.035"/>
       </geometry>
@@ -142,7 +142,7 @@
     name="le_be_joint"
     type="continuous">
     <origin
-      xyz="-0.093021 0.08425 0.012513"
+      xyz="-0.093 0.08425 0.0125"
       rpy="0 0 0" />
     <parent
       link="base_link" />
@@ -185,9 +185,7 @@
       </material>
     </visual>
     <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="1.5708 0 0" />
+      <origin xyz="0 0 0" rpy="1.5708 0 0" />
       <geometry>
         <cylinder radius="0.04" length="0.035"/>
       </geometry>
@@ -197,7 +195,7 @@
     name="ri_fr_joint"
     type="continuous">
     <origin
-      xyz="0.092979 -0.08425 0.012487"
+      xyz="0.093 -0.08425 0.0125"
       rpy="0 0 0" />
     <parent
       link="base_link" />
@@ -240,9 +238,7 @@
       </material>
     </visual>
     <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="1.5708 0 0" />
+      <origin xyz="0 0 0" rpy="1.5708 0 0" />
       <geometry>
         <cylinder radius="0.04" length="0.035"/>
       </geometry>
@@ -252,7 +248,7 @@
     name="ri_be_joint"
     type="continuous">
     <origin
-      xyz="-0.092963 -0.08425 0.012478"
+      xyz="-0.093 -0.08425 0.0125"
       rpy="0 0 0" />
     <parent
       link="base_link" />
@@ -384,32 +380,155 @@
   <joint name="base_joint" type="fixed">
     <parent link="base_footprint"/>
     <child link="base_link"/>
-    <origin xyz="0.0 0.0 0.0215" rpy="0 0 0"/>
+    <!-- Put base_footprint at the wheel-ground contact plane.  The wheel
+         centers are about 0.0125 m above base_link and the wheels have a
+         0.04 m radius. -->
+    <origin xyz="0.0 0.0 0.0275" rpy="0 0 0"/>
   </joint>
 
   <!-- Gazebo Sim extensions for the M1 model.  The mesh geometry and joint
        names above remain the vendor description; only simulation behavior is
        added here. -->
   <gazebo reference="le_fr_Link">
-    <mu1>1.0</mu1>
-    <mu2>0.0</mu2>
-    <fdir1>1 -1 0</fdir1>
+    <collision>
+      <surface>
+        <friction>
+          <ode>
+            <mu>1.0</mu>
+            <mu2>0.1</mu2>
+            <fdir1 ignition:expressed_in="base_footprint">1 -1 0</fdir1>
+          </ode>
+        </friction>
+      </surface>
+    </collision>
+    <xacro:if value="$(arg enable_contact_sensors)">
+      <sensor name="le_fr_contact" type="contact">
+        <always_on>true</always_on>
+        <update_rate>100</update_rate>
+        <contact>
+          <collision>le_fr_Link_collision</collision>
+          <topic>/m1/contact/le_fr</topic>
+        </contact>
+      </sensor>
+    </xacro:if>
   </gazebo>
+  <xacro:if value="$(arg enable_force_torque_sensors)">
+    <gazebo reference="le_fr_joint">
+      <sensor name="le_fr_force_torque" type="force_torque">
+        <always_on>true</always_on>
+        <update_rate>100</update_rate>
+        <force_torque>
+          <frame>parent</frame>
+          <measure_direction>child_to_parent</measure_direction>
+        </force_torque>
+      </sensor>
+    </gazebo>
+  </xacro:if>
   <gazebo reference="le_be_Link">
-    <mu1>1.0</mu1>
-    <mu2>0.0</mu2>
-    <fdir1>1 1 0</fdir1>
+    <collision>
+      <surface>
+        <friction>
+          <ode>
+            <mu>1.0</mu>
+            <mu2>0.1</mu2>
+            <fdir1 ignition:expressed_in="base_footprint">1 1 0</fdir1>
+          </ode>
+        </friction>
+      </surface>
+    </collision>
+    <xacro:if value="$(arg enable_contact_sensors)">
+      <sensor name="le_be_contact" type="contact">
+        <always_on>true</always_on>
+        <update_rate>100</update_rate>
+        <contact>
+          <collision>le_be_Link_collision</collision>
+          <topic>/m1/contact/le_be</topic>
+        </contact>
+      </sensor>
+    </xacro:if>
   </gazebo>
+  <xacro:if value="$(arg enable_force_torque_sensors)">
+    <gazebo reference="le_be_joint">
+      <sensor name="le_be_force_torque" type="force_torque">
+        <always_on>true</always_on>
+        <update_rate>100</update_rate>
+        <force_torque>
+          <frame>parent</frame>
+          <measure_direction>child_to_parent</measure_direction>
+        </force_torque>
+      </sensor>
+    </gazebo>
+  </xacro:if>
   <gazebo reference="ri_fr_Link">
-    <mu1>1.0</mu1>
-    <mu2>0.0</mu2>
-    <fdir1>1 1 0</fdir1>
+    <collision>
+      <surface>
+        <friction>
+          <ode>
+            <mu>1.0</mu>
+            <mu2>0.1</mu2>
+            <fdir1 ignition:expressed_in="base_footprint">1 1 0</fdir1>
+          </ode>
+        </friction>
+      </surface>
+    </collision>
+    <xacro:if value="$(arg enable_contact_sensors)">
+      <sensor name="ri_fr_contact" type="contact">
+        <always_on>true</always_on>
+        <update_rate>100</update_rate>
+        <contact>
+          <collision>ri_fr_Link_collision</collision>
+          <topic>/m1/contact/ri_fr</topic>
+        </contact>
+      </sensor>
+    </xacro:if>
   </gazebo>
+  <xacro:if value="$(arg enable_force_torque_sensors)">
+    <gazebo reference="ri_fr_joint">
+      <sensor name="ri_fr_force_torque" type="force_torque">
+        <always_on>true</always_on>
+        <update_rate>100</update_rate>
+        <force_torque>
+          <frame>parent</frame>
+          <measure_direction>child_to_parent</measure_direction>
+        </force_torque>
+      </sensor>
+    </gazebo>
+  </xacro:if>
   <gazebo reference="ri_be_Link">
-    <mu1>1.0</mu1>
-    <mu2>0.0</mu2>
-    <fdir1>1 -1 0</fdir1>
+    <collision>
+      <surface>
+        <friction>
+          <ode>
+            <mu>1.0</mu>
+            <mu2>0.1</mu2>
+            <fdir1 ignition:expressed_in="base_footprint">1 -1 0</fdir1>
+          </ode>
+        </friction>
+      </surface>
+    </collision>
+    <xacro:if value="$(arg enable_contact_sensors)">
+      <sensor name="ri_be_contact" type="contact">
+        <always_on>true</always_on>
+        <update_rate>100</update_rate>
+        <contact>
+          <collision>ri_be_Link_collision</collision>
+          <topic>/m1/contact/ri_be</topic>
+        </contact>
+      </sensor>
+    </xacro:if>
   </gazebo>
+  <xacro:if value="$(arg enable_force_torque_sensors)">
+    <gazebo reference="ri_be_joint">
+      <sensor name="ri_be_force_torque" type="force_torque">
+        <always_on>true</always_on>
+        <update_rate>100</update_rate>
+        <force_torque>
+          <frame>parent</frame>
+          <measure_direction>child_to_parent</measure_direction>
+        </force_torque>
+      </sensor>
+    </gazebo>
+  </xacro:if>
 
   <xacro:if value="$(arg enable_gpu_lidar)">
     <!-- T-MINI PLUS profile: 0.54 deg angular resolution, 12 Hz, 0.05 to 12 m. -->
@@ -456,15 +575,15 @@
       <wheelbase>0.186</wheelbase>
       <wheel_radius>0.04</wheel_radius>
       <topic>/cmd_vel</topic>
-      <odom_topic>/odom</odom_topic>
+      <odom_topic>/wheel_odom</odom_topic>
       <min_acceleration>-1.0</min_acceleration>
       <max_acceleration>1.0</max_acceleration>
     </plugin>
     <plugin filename="ignition-gazebo-odometry-publisher-system"
             name="ignition::gazebo::systems::OdometryPublisher">
       <odom_frame>odom</odom_frame>
-      <robot_base_frame>base_link</robot_base_frame>
-      <child_frame_id>base_link</child_frame_id>
+      <robot_base_frame>base_footprint</robot_base_frame>
+      <child_frame_id>base_footprint</child_frame_id>
       <odom_publish_frequency>30</odom_publish_frequency>
       <odom_topic>/odom</odom_topic>
       <tf_topic>/tf</tf_topic>
