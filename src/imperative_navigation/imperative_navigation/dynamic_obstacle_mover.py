@@ -22,10 +22,12 @@ class DynamicObstacleMover(Node):
         super().__init__("dynamic_obstacle_mover")
         self.declare_parameter("control_period", 0.1)
         self.declare_parameter("random_seed", -1)
+        self.declare_parameter("enabled", True)
         self.declare_parameter("pose_service", "/world/imperative_m1/set_pose")
         self.declare_parameter("obstacle_topic", "/imperative/dynamic_obstacles")
 
         self.period = float(self.get_parameter("control_period").value)
+        self.enabled = bool(self.get_parameter("enabled").value)
         configured_seed = int(self.get_parameter("random_seed").value)
         self.seed = configured_seed if configured_seed >= 0 else time.time_ns() & 0xFFFFFFFF
         self.random = random.Random(self.seed)
@@ -47,9 +49,10 @@ class DynamicObstacleMover(Node):
         self.publisher = self.create_publisher(
             PoseArray, self.get_parameter("obstacle_topic").value, 10)
         self.last_service_warning = -1
+        self.parked = False
         self.create_timer(self.period, self.step)
         self.get_logger().info(
-            f"Random moving-obstacle controller ready (seed={self.seed}).")
+            f"Dynamic-obstacle controller ready (enabled={self.enabled}, seed={self.seed}).")
 
     @staticmethod
     def distance(first, second):
@@ -129,6 +132,22 @@ class DynamicObstacleMover(Node):
             if self.last_service_warning < 0 or now - self.last_service_warning >= 1_000_000_000:
                 self.last_service_warning = now
                 self.get_logger().warn("Waiting for Gazebo /set_pose service bridge.")
+            return
+
+        if not self.enabled:
+            # Keep the dynamic models from contaminating a static-only test.
+            # They remain in the shared SDF but are parked outside the room and
+            # an empty truth message is published for the software lidar/logger.
+            if not self.parked:
+                for index, obstacle in enumerate(self.obstacles):
+                    obstacle["position"] = [10.0 + index, 10.0]
+                    self.send_pose(obstacle)
+                self.parked = True
+                self.get_logger().info("Dynamic obstacles parked for the static-only scenario.")
+            message = PoseArray()
+            message.header.stamp = self.get_clock().now().to_msg()
+            message.header.frame_id = "odom"
+            self.publisher.publish(message)
             return
 
         for obstacle in self.obstacles:

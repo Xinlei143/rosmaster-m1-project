@@ -8,10 +8,13 @@ from launch.actions import (
     DeclareLaunchArgument,
     IncludeLaunchDescription,
     OpaqueFunction,
+    RegisterEventHandler,
     SetEnvironmentVariable,
+    Shutdown,
     TimerAction,
 )
 from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
@@ -114,7 +117,7 @@ def generate_launch_description():
             # Matches the static cylinders in imperative_m1.sdf.  This is used
             # only when the WSLg/OGRE GPU-LiDAR bug saturates every beam.
             "static_obstacles": [-2.05, -1.18, 0.3, -3.0, 2.2, 0.3],
-            "require_dynamic_obstacles": True,
+            "require_dynamic_obstacles": LaunchConfiguration("dynamic_obstacles"),
         }],
     )
 
@@ -123,7 +126,11 @@ def generate_launch_description():
         executable="dynamic_obstacle_mover",
         name="dynamic_obstacle_mover",
         output="screen",
-        parameters=[{"use_sim_time": True}],
+        parameters=[{
+            "use_sim_time": True,
+            "enabled": LaunchConfiguration("dynamic_obstacles"),
+            "random_seed": LaunchConfiguration("dynamic_seed"),
+        }],
     )
 
     software_lidar = Node(
@@ -141,6 +148,27 @@ def generate_launch_description():
         arguments=["-d", os.path.join(package_share, "rviz", "imperative.rviz")],
         condition=IfCondition(LaunchConfiguration("rviz")),
         output="screen",
+    )
+
+    performance_recorder = Node(
+        package="imperative_navigation",
+        executable="avoidance_performance_recorder",
+        name="avoidance_performance_recorder",
+        condition=IfCondition(LaunchConfiguration("record_performance")),
+        output="screen",
+        parameters=[{
+            "use_sim_time": True,
+            "scenario": PythonExpression([
+                "'dynamic' if '", LaunchConfiguration("dynamic_obstacles"),
+                "' == 'true' else 'static'",
+            ]),
+            "output_dir": LaunchConfiguration("performance_output_dir"),
+            "timeout": LaunchConfiguration("performance_timeout"),
+            "goal_x": 2.5,
+            "goal_y": 1.5,
+            "robot_radius": LaunchConfiguration("robot_radius"),
+            "safety_margin": LaunchConfiguration("safety_margin"),
+        }],
     )
 
     # Gazebo Sim resolves package:// mesh URIs as model:// package paths.  The
@@ -161,6 +189,21 @@ def generate_launch_description():
             description=(
                 "Use the software fallback LaserScan. Set true if the GPU lidar "
                 "is unavailable on this WSLg installation.")),
+        DeclareLaunchArgument(
+            "dynamic_obstacles", default_value="true",
+            description="Move dynamic obstacles; false parks them outside the room."),
+        DeclareLaunchArgument(
+            "dynamic_seed", default_value="20260814",
+            description="Deterministic seed for the moving-obstacle scenario."),
+        DeclareLaunchArgument(
+            "record_performance", default_value="false",
+            description="Record command and odometry motion until goal or timeout."),
+        DeclareLaunchArgument(
+            "performance_output_dir", default_value="/tmp/imperative_m1_performance",
+            description="Empty/new directory for benchmark CSV and summary files."),
+        DeclareLaunchArgument(
+            "performance_timeout", default_value="60.0",
+            description="Benchmark duration measured in simulation seconds."),
         DeclareLaunchArgument("max_speed", default_value="1.0", description="Planner speed cap [m/s]."),
         DeclareLaunchArgument("max_acceleration", default_value="1.0",
                               description="Planner acceleration cap [m/s^2]."),
@@ -189,5 +232,10 @@ def generate_launch_description():
         dynamic_obstacle_mover,
         software_lidar,
         controller,
+        performance_recorder,
         rviz,
+        RegisterEventHandler(OnProcessExit(
+            target_action=performance_recorder,
+            on_exit=[Shutdown(reason="avoidance benchmark finished")],
+        )),
     ])
