@@ -412,11 +412,11 @@
   </gazebo>
 
   <xacro:if value="$(arg enable_gpu_lidar)">
-    <!-- T-MINI PLUS profile: 0.54 deg angular resolution, 6 Hz, 0.05 to 12 m. -->
+    <!-- T-MINI PLUS profile: 0.54 deg angular resolution, 12 Hz, 0.05 to 12 m. -->
     <gazebo reference="laser_Link">
       <sensor name="tmini_plus" type="gpu_lidar">
         <topic>/scan</topic>
-        <update_rate>6</update_rate>
+        <update_rate>12</update_rate>
         <always_on>true</always_on>
         <visualize>false</visualize>
         <ray>

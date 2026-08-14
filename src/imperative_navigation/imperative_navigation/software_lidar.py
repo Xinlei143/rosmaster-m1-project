@@ -20,7 +20,7 @@ from sensor_msgs.msg import LaserScan
 class SoftwareLidar(Node):
     """Raycast the room walls and circular obstacles from measured odometry."""
 
-    # T-MINI PLUS simulation profile: 0.54 deg, 6 Hz, 0.05--12 m.
+    # T-MINI PLUS simulation profile: 0.54 deg, 12 Hz, 0.05--12 m.
     RANGE_MIN = 0.05
     RANGE_MAX = 12.0
     OBSTACLE_RADIUS = 0.30
@@ -45,10 +45,10 @@ class SoftwareLidar(Node):
         self.sample_count = 667
         self.angle_min = -math.pi
         self.angle_increment = 2.0 * math.pi / self.sample_count
-        self.create_timer(1.0 / 6.0, self.publish_scan)
+        self.create_timer(1.0 / 12.0, self.publish_scan)
         self.get_logger().info(
             "Software lidar ready; publishing T-MINI PLUS profile "
-            "(667 beams, 6 Hz, 0.05-12 m) on /sim_scan.")
+            "(667 beams, 12 Hz, 0.05-12 m) on /sim_scan.")
 
     def odom_callback(self, message):
         pose = message.pose.pose
@@ -99,7 +99,7 @@ class SoftwareLidar(Node):
         scan.angle_min = self.angle_min
         scan.angle_max = self.angle_min + (self.sample_count - 1) * self.angle_increment
         scan.angle_increment = self.angle_increment
-        scan.scan_time = 1.0 / 6.0
+        scan.scan_time = 1.0 / 12.0
         scan.range_min = self.RANGE_MIN
         scan.range_max = self.RANGE_MAX
         centers = self.STATIC_CENTERS + self.dynamic_centers
