@@ -55,8 +55,8 @@ STATIC_OBSTACLE_CENTERS = torch.tensor([[-2.5, 1.8], [2.5, -1.8]])  # m, static 
 
 ROBOT_RADIUS = 0.15  # m
 SAFETY_MARGIN = 0.15  # m
-LIDAR_RANGE = 10.0  # m
-LIDAR_POINTS = 181  # beams, full scan
+LIDAR_RANGE = 12.0  # m, T-MINI PLUS maximum range
+LIDAR_POINTS = 667  # beams, approximately 0.54 deg over a full scan
 LIDAR_SAFE_DISTANCE = ROBOT_RADIUS + SAFETY_MARGIN  # m, surface clearance
 PLANNING_CLEARANCE_MARGIN = 0.15  # m, acceleration response
 # The physical M1 adapter can make these directional: a larger clearance is
@@ -410,7 +410,10 @@ def scan_to_detections(robot_position, lidar_points, lidar_hits, profile=None,
 
     stage_start = time.perf_counter() if profiling else None
     if len(clusters) > 1:
-        wrapped_gap = hit_indices[0] + LIDAR_POINTS - hit_indices[-1]
+        # Real and simulated LaserScan messages may use a different beam
+        # count from the built-in demo. Infer the count from the message so
+        # wrap-around clustering remains correct for the Yahboom model.
+        wrapped_gap = hit_indices[0] + len(lidar_points) - hit_indices[-1]
         wrapped_distance = torch.linalg.norm(local_points[0] - local_points[-1])
 
         if wrapped_gap == 1 and wrapped_distance <= CLUSTER_GAP:
