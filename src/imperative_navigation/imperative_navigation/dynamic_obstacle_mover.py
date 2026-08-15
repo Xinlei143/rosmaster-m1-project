@@ -1,4 +1,4 @@
-"""Randomly move Gazebo obstacles and publish their simulation-truth centers.
+"""Continuously move Gazebo obstacles and publish Gazebo-measured centers.
 
 This node exists solely for the Gazebo WSLg test.  A real robot must obtain
 obstacle centers from its sensor pipeline, never from a simulator pose service.
@@ -9,14 +9,15 @@ import random
 import time
 
 import rclpy
-from geometry_msgs.msg import Pose, PoseArray
+from geometry_msgs.msg import Pose, PoseArray, Twist
 from rclpy.node import Node
 from ros_gz_interfaces.msg import Entity
 from ros_gz_interfaces.srv import SetEntityPose
+from tf2_msgs.msg import TFMessage
 
 
 class DynamicObstacleMover(Node):
-    """Move three collision cylinders between independently sampled waypoints."""
+    """Command three Gazebo velocity-controlled cylinders between waypoints."""
 
     def __init__(self):
         super().__init__("dynamic_obstacle_mover")
@@ -25,6 +26,8 @@ class DynamicObstacleMover(Node):
         self.declare_parameter("enabled", True)
         self.declare_parameter("pose_service", "/world/imperative_m1/set_pose")
         self.declare_parameter("obstacle_topic", "/imperative/dynamic_obstacles")
+        self.declare_parameter("pose_publish_period", 1.0 / 30.0)
+        self.declare_parameter("gazebo_pose_topic", "/imperative/gazebo_dynamic_tf")
 
         self.period = float(self.get_parameter("control_period").value)
         self.enabled = bool(self.get_parameter("enabled").value)
@@ -44,13 +47,31 @@ class DynamicObstacleMover(Node):
             obstacle["target"] = self.sample_approach_target(obstacle["position"], index)
             obstacle["approaching"] = True
 
+        # Gazebo's VelocityControl system owns the continuous motion.  The
+        # controller sends a direction at a modest ROS rate, while Gazebo
+        # integrates that velocity at every physics step.  This avoids the
+        # old 10 Hz set_pose teleports, which were especially visible on WSLg.
+        self.velocity_publishers = {
+            obstacle["name"]: self.create_publisher(
+                Twist, f"/model/{obstacle['name']}/cmd_vel", 10)
+            for obstacle in self.obstacles
+        }
+        # This service is retained only to park the models in static-only
+        # scenarios. It is never used while the obstacles are moving.
         self.client = self.create_client(
             SetEntityPose, self.get_parameter("pose_service").value)
         self.publisher = self.create_publisher(
             PoseArray, self.get_parameter("obstacle_topic").value, 10)
+        self.actual_poses = {}
+        self.obstacle_names = {obstacle["name"] for obstacle in self.obstacles}
+        self.create_subscription(
+            TFMessage, self.get_parameter("gazebo_pose_topic").value,
+            self.gazebo_pose_callback, 10)
         self.last_service_warning = -1
         self.parked = False
         self.create_timer(self.period, self.step)
+        self.create_timer(
+            float(self.get_parameter("pose_publish_period").value), self.publish_actual_positions)
         self.get_logger().info(
             f"Dynamic-obstacle controller ready (enabled={self.enabled}, seed={self.seed}).")
 
@@ -109,37 +130,54 @@ class DynamicObstacleMover(Node):
         request.entity.type = Entity.MODEL
         request.pose.position.x = obstacle["position"][0]
         request.pose.position.y = obstacle["position"][1]
-        request.pose.position.z = 0.3
+        request.pose.position.z = 0.35
         request.pose.orientation.w = 1.0
         self.client.call_async(request)
 
-    def publish_positions(self):
+    def send_velocity(self, obstacle, velocity_x, velocity_y):
+        command = Twist()
+        command.linear.x = velocity_x
+        command.linear.y = velocity_y
+        self.velocity_publishers[obstacle["name"]].publish(command)
+
+    def gazebo_pose_callback(self, message):
+        """Store world-frame poses from Gazebo's dynamic-pose publisher."""
+        for transform in message.transforms:
+            name = transform.child_frame_id
+            if name not in self.obstacle_names:
+                continue
+            pose = Pose()
+            pose.position.x = transform.transform.translation.x
+            pose.position.y = transform.transform.translation.y
+            pose.position.z = transform.transform.translation.z
+            pose.orientation = transform.transform.rotation
+            self.actual_poses[name] = pose
+
+    def publish_actual_positions(self):
+        """Publish Gazebo's current model poses, not the controller estimate."""
+        if len(self.actual_poses) != len(self.obstacles):
+            return
         message = PoseArray()
         message.header.stamp = self.get_clock().now().to_msg()
         message.header.frame_id = "odom"
         for obstacle in self.obstacles:
-            pose = Pose()
-            pose.position.x = obstacle["position"][0]
-            pose.position.y = obstacle["position"][1]
-            pose.position.z = 0.3
-            pose.orientation.w = 1.0
-            message.poses.append(pose)
+            message.poses.append(self.actual_poses[obstacle["name"]])
         self.publisher.publish(message)
 
     def step(self):
-        if not self.client.service_is_ready():
-            now = self.get_clock().now().nanoseconds
-            if self.last_service_warning < 0 or now - self.last_service_warning >= 1_000_000_000:
-                self.last_service_warning = now
-                self.get_logger().warn("Waiting for Gazebo /set_pose service bridge.")
-            return
-
         if not self.enabled:
             # Keep the dynamic models from contaminating a static-only test.
             # They remain in the shared SDF but are parked outside the room and
             # an empty truth message is published for the software lidar/logger.
             if not self.parked:
+                if not self.client.service_is_ready():
+                    now = self.get_clock().now().nanoseconds
+                    if self.last_service_warning < 0 or now - self.last_service_warning >= 1_000_000_000:
+                        self.last_service_warning = now
+                        self.get_logger().warn("Waiting for Gazebo /set_pose service bridge to park obstacles.")
+                    return
                 for index, obstacle in enumerate(self.obstacles):
+                    self.send_velocity(obstacle, 0.0, 0.0)
                     obstacle["position"] = [10.0 + index, 10.0]
                     self.send_pose(obstacle)
                 self.parked = True
@@ -157,13 +195,15 @@ class DynamicObstacleMover(Node):
             travel = obstacle["speed"] * self.period
             if distance <= travel:
                 obstacle["position"] = list(obstacle["target"])
+                self.send_velocity(obstacle, 0.0, 0.0)
                 obstacle["target"] = self.sample_target(obstacle["position"])
                 obstacle["approaching"] = False
             else:
-                obstacle["position"][0] += travel * offset_x / distance
-                obstacle["position"][1] += travel * offset_y / distance
-            self.send_pose(obstacle)
-        self.publish_positions()
+                velocity_x = obstacle["speed"] * offset_x / distance
+                velocity_y = obstacle["speed"] * offset_y / distance
+                self.send_velocity(obstacle, velocity_x, velocity_y)
+                obstacle["position"][0] += velocity_x * self.period
+                obstacle["position"][1] += velocity_y * self.period
 
 
 def main(args=None):

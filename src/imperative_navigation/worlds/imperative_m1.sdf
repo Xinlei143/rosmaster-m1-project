@@ -131,12 +131,18 @@
       </link>
     </model>
 
-    <!-- The ROS motion node teleports these kinematic collision cylinders at
-         10 Hz through Gazebo's set_pose service. -->
+    <!-- Gazebo integrates these collision cylinders continuously through its
+         VelocityControl system. ROS supplies velocity commands, never moving
+         models by repeated pose teleports. -->
     <model name="moving_obstacle_1">
-      <pose>2.35 2.35 0.3 0 0 0</pose>
-      <static>true</static>
+      <pose>2.35 2.35 0.35 0 0 0</pose>
       <link name="link">
+        <gravity>false</gravity>
+        <kinematic>true</kinematic>
+        <inertial>
+          <mass>100.0</mass>
+          <inertia><ixx>3.0</ixx><iyy>3.0</iyy><izz>3.0</izz></inertia>
+        </inertial>
         <collision name="collision">
           <geometry><cylinder><radius>0.3</radius><length>0.6</length></cylinder></geometry>
         </collision>
@@ -145,11 +151,18 @@
           <material><diffuse>0.95 0.55 0.05 1</diffuse></material>
         </visual>
       </link>
+      <plugin filename="ignition-gazebo-velocity-control-system"
+              name="ignition::gazebo::systems::VelocityControl"/>
     </model>
     <model name="moving_obstacle_2">
-      <pose>3.10 1.35 0.3 0 0 0</pose>
-      <static>true</static>
+      <pose>3.10 1.35 0.35 0 0 0</pose>
       <link name="link">
+        <gravity>false</gravity>
+        <kinematic>true</kinematic>
+        <inertial>
+          <mass>100.0</mass>
+          <inertia><ixx>3.0</ixx><iyy>3.0</iyy><izz>3.0</izz></inertia>
+        </inertial>
         <collision name="collision">
           <geometry><cylinder><radius>0.3</radius><length>0.6</length></cylinder></geometry>
         </collision>
@@ -158,11 +171,18 @@
           <material><diffuse>0.2 0.65 0.25 1</diffuse></material>
         </visual>
       </link>
+      <plugin filename="ignition-gazebo-velocity-control-system"
+              name="ignition::gazebo::systems::VelocityControl"/>
     </model>
     <model name="moving_obstacle_3">
-      <pose>2.40 0.55 0.3 0 0 0</pose>
-      <static>true</static>
+      <pose>2.40 0.55 0.35 0 0 0</pose>
       <link name="link">
+        <gravity>false</gravity>
+        <kinematic>true</kinematic>
+        <inertial>
+          <mass>100.0</mass>
+          <inertia><ixx>3.0</ixx><iyy>3.0</iyy><izz>3.0</izz></inertia>
+        </inertial>
         <collision name="collision">
           <geometry><cylinder><radius>0.3</radius><length>0.6</length></cylinder></geometry>
         </collision>
@@ -171,6 +191,8 @@
           <material><diffuse>0.25 0.4 0.95 1</diffuse></material>
         </visual>
       </link>
+      <plugin filename="ignition-gazebo-velocity-control-system"
+              name="ignition::gazebo::systems::VelocityControl"/>
     </model>
   </world>
 </sdf>

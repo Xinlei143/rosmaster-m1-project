@@ -87,7 +87,14 @@ def generate_launch_description():
             "/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
             "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
             "/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V",
+            "/model/moving_obstacle_1/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
+            "/model/moving_obstacle_2/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
+            "/model/moving_obstacle_3/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
+            "/world/imperative_m1/dynamic_pose/info@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V",
             "/world/imperative_m1/set_pose@ros_gz_interfaces/srv/SetEntityPose",
+        ],
+        remappings=[
+            ("/world/imperative_m1/dynamic_pose/info", "/imperative/gazebo_dynamic_tf"),
         ],
         output="screen",
     )
