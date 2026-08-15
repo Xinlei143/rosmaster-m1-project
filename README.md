@@ -153,6 +153,9 @@ ros2 launch imperative_navigation imperative_m1_gazebo.launch.py
 
 默认目标点为 `(2.5, 1.5)`。Gazebo 世界中的 M1 初始位置约为 `(-2.5, -1.5)`，场景中还包含墙体、静态圆柱和动态圆柱。
 
+动态圆柱默认使用 `dynamic_motion_mode:=continuous`：速度和方向会按随机时间平滑变化，遇到边界或已知
+障碍物时会转向。若要恢复旧的固定速度随机目标点巡逻，可设置 `dynamic_motion_mode:=random_waypoint`。
+
 仿真模型使用 Yahboom 原厂 M1 STL 作为视觉外观；Gazebo 专用 Xacro 将底盘碰撞替换为简单几何体，以避免复杂 STL 碰撞网格拖慢物理仿真。模型资源路径由 launch 自动加入 Gazebo 环境。
 
 ### 4.2 常用仿真参数
