@@ -48,7 +48,7 @@ def generate_launch_description():
                               description="Bypass side: 0 auto-selects wider LiDAR clearance; 1 left, -1 right."),
         DeclareLaunchArgument("trajectory_planner_enabled", default_value="true",
                               description="Use continuous receding-horizon holonomic trajectory planning."),
-        DeclareLaunchArgument("trajectory_horizon", default_value="40",
+        DeclareLaunchArgument("trajectory_horizon", default_value="20",
                               description="Trajectory rollout length [steps]."),
         DeclareLaunchArgument("trajectory_heading_samples", default_value="41",
                               description="Number of sampled velocity headings per rollout."),
