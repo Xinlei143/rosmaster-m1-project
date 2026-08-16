@@ -1,4 +1,4 @@
-"""Tests for adapter-side track confirmation and smoothing."""
+"""Tests for adapter-side Kalman-track confirmation and classification."""
 
 import sys
 from pathlib import Path
@@ -29,12 +29,12 @@ def test_transient_or_missed_tracks_are_not_predicted():
     assert filter_.update([track(age=3, missed=1)]) == []
 
 
-def test_confirmed_track_position_is_smoothed_and_static_velocity_zeroed():
-    filter_ = ConfirmedTrackFilter(position_alpha=0.25, static_speed_threshold=0.25)
+def test_confirmed_track_keeps_kalman_position_and_zeroes_static_velocity():
+    filter_ = ConfirmedTrackFilter(static_speed_threshold=0.25)
     first = filter_.update([track(position=(0.0, 0.0), velocity=(0.10, 0.0))])[0]
     second = filter_.update([track(position=(1.0, 0.0), velocity=(0.10, 0.0))])[0]
     assert torch.allclose(first["position"], torch.tensor([0.0, 0.0]))
-    assert torch.allclose(second["position"], torch.tensor([0.25, 0.0]))
+    assert torch.allclose(second["position"], torch.tensor([1.0, 0.0]))
     assert torch.equal(second["velocity"], torch.zeros(2))
 
 

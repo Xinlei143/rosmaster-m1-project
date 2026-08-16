@@ -22,3 +22,15 @@ def test_only_confirmed_moving_track_can_block_goal_arrival_region():
     moving_track = {"position": torch.tensor([1.02, 0.0]), "velocity": torch.tensor([0.3, 0.0])}
     assert not goal_is_dynamically_blocked(goal, [static_track], 0.12, 0.20)
     assert goal_is_dynamically_blocked(goal, [moving_track], 0.12, 0.20)
+
+
+def test_goal_blocking_uses_each_tracks_measured_radius():
+    goal = torch.tensor([0.0, 0.0])
+    small_track = {
+        "position": torch.tensor([0.35, 0.0]),
+        "velocity": torch.tensor([0.3, 0.0]),
+        "radius": 0.10,
+    }
+    large_track = dict(small_track, radius=0.30)
+    assert not goal_is_dynamically_blocked(goal, [small_track], 0.12, 0.20)
+    assert goal_is_dynamically_blocked(goal, [large_track], 0.12, 0.20)

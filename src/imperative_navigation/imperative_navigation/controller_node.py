@@ -37,12 +37,12 @@ class ImperativeController(Node):
         self.declare_parameter("robot_radius", 0.15)
         self.declare_parameter("safety_margin", 0.15)
         self.declare_parameter("trajectory_planner_enabled", True)
-        self.declare_parameter("trajectory_horizon", 40)
+        # Twenty 0.1 s rollout steps give a two-second preview.
+        self.declare_parameter("trajectory_horizon", 20)
         self.declare_parameter("trajectory_heading_samples", 41)
         self.declare_parameter("trajectory_speed_samples", 4)
         self.declare_parameter("dynamic_obstacle_radius", 0.20)
         self.declare_parameter("track_confirmation_age", 3)
-        self.declare_parameter("track_position_alpha", 0.35)
         self.declare_parameter("static_track_speed_threshold", 0.25)
         self.declare_parameter("moving_confirmation_age", 3)
         self.declare_parameter("scan_topic", "/scan")
@@ -101,7 +101,6 @@ class ImperativeController(Node):
         self.planning_tracks = []
         self.track_filter = ConfirmedTrackFilter(
             self.get_parameter("track_confirmation_age").value,
-            self.get_parameter("track_position_alpha").value,
             self.get_parameter("static_track_speed_threshold").value,
             self.get_parameter("moving_confirmation_age").value)
         self.published_track_ids = set()
@@ -129,7 +128,7 @@ class ImperativeController(Node):
         self.scan_is_saturated = False
         self.scan_hit_count = 0
         self.scan_min_range = float("nan")
-        self.sim_dynamic_detections = torch.empty(0, 2)
+        self.sim_dynamic_detections = []
         self.last_dynamic_obstacles_time = None
         self.last_debug_log_time = -1
         self.last_saturation_warning_time = -1
@@ -157,8 +156,14 @@ class ImperativeController(Node):
 
     def dynamic_obstacles_callback(self, message):
         """Accept Gazebo's simulation-truth obstacle centers in the WSLg fallback."""
-        self.sim_dynamic_detections = torch.tensor(
-            [[pose.position.x, pose.position.y] for pose in message.poses], dtype=torch.float32)
+        fallback_radius = float(self.get_parameter("dynamic_obstacle_radius").value)
+        self.sim_dynamic_detections = [{
+            "position": torch.tensor(
+                [pose.position.x, pose.position.y], dtype=torch.float32),
+            "radius": fallback_radius,
+            "point_count": 0,
+            "nearest_range": float("nan"),
+        } for pose in message.poses]
         self.last_dynamic_obstacles_time = self.get_clock().now().nanoseconds
 
     def have_fresh_dynamic_obstacles(self, now):
@@ -196,7 +201,11 @@ class ImperativeController(Node):
             self.publish_stop()
             return
 
+        callback_start = time.perf_counter()
+        profile, detection_profile = {}, {}
+        stage_start = time.perf_counter()
         lidar_points, lidar_hits = self.scan_as_world_relative_points()
+        profile["laser_scan_to_points"] = time.perf_counter() - stage_start
         now = self.get_clock().now().nanoseconds
         if (self.scan_is_saturated and
                 (self.last_saturation_warning_time < 0 or
@@ -217,17 +226,26 @@ class ImperativeController(Node):
             self.publish_visualization()
             return
         if self.scan_is_saturated:
-            detections = self.sim_dynamic_detections if dynamic_feed_is_fresh else torch.empty(0, 2)
+            detections = self.sim_dynamic_detections if dynamic_feed_is_fresh else []
             world_points = torch.empty(0, 2)
+            detection_profile = {
+                "cluster_scan": 0.0, "cluster_filter": 0.0,
+                "cluster_geometry": 0.0, "detection_count": len(detections),
+                "initial_cluster_count": 0,
+            }
+            profile["cluster_detection"] = 0.0
             if self.last_saturation_warning_time == now:
                 self.get_logger().warn(
                     "GPU LiDAR is saturated; using configured static_obstacles fallback. "
                     "Dynamic obstacles are supplied by the Gazebo simulation feed.")
         else:
-            detections, world_points, _ = self.algorithm.scan_to_detections(
-                self.position, lidar_points, lidar_hits)
+            stage_start = time.perf_counter()
+            detections, world_points, _ = self.algorithm.scan_to_cluster_detections(
+                self.position, lidar_points, lidar_hits, profile=detection_profile)
+            profile["cluster_detection"] = time.perf_counter() - stage_start
+        stage_start = time.perf_counter()
         self.tracks, self.next_track_id = self.algorithm.update_tracks(
-            self.tracks, detections, self.next_track_id)
+            self.tracks, detections, self.next_track_id, dt=self.algorithm.DT)
 
         # This is the same dynamic-point removal policy used in
         # Imperative_learning_2D_moving.run_navigation: retain a trajectory
@@ -240,16 +258,22 @@ class ImperativeController(Node):
             track["id"] for track in self.planning_tracks
             if torch.linalg.norm(track["velocity"]) > 0.0}
 
+        tracks_by_id = {track["id"]: track for track in self.planning_tracks}
         moving_histories = [torch.stack(self.track_histories[track_id])
                             for track_id in self.dynamic_track_ids
                             if track_id in self.track_histories]
-        active_dynamic_tracks = [track["position"] for track in self.planning_tracks
-                                 if track["id"] in self.dynamic_track_ids]
-        if active_dynamic_tracks:
-            moving_histories.append(torch.stack(active_dynamic_tracks))
+        moving_radii = [torch.full(
+            (len(self.track_histories[track_id]),), float(tracks_by_id[track_id]["radius"]))
+            for track_id in self.dynamic_track_ids
+            if track_id in self.track_histories and track_id in tracks_by_id]
         dynamic_centers = (torch.cat(moving_histories)
                            if moving_histories else torch.empty(0, 2))
-        self.map_points = self.algorithm.update_slam_map(self.map_points, world_points, dynamic_centers)
+        dynamic_radii = torch.cat(moving_radii) if moving_radii else torch.empty(0)
+        profile["update_tracks"] = time.perf_counter() - stage_start
+        stage_start = time.perf_counter()
+        self.map_points = self.algorithm.update_slam_map(
+            self.map_points, world_points, dynamic_centers, dynamic_radii)
+        profile["update_slam_map"] = time.perf_counter() - stage_start
 
         goal_distance = torch.linalg.norm(self.algorithm.GOAL - self.position)
         if goal_distance <= self.algorithm.GOAL_TOLERANCE:
@@ -262,6 +286,7 @@ class ImperativeController(Node):
             self.publish_visualization()
             return
 
+        stage_start = time.perf_counter()
         if bool(self.get_parameter("trajectory_planner_enabled").value):
             obstacle_points = torch.cat((self.static_fallback_map, world_points))
             clearance = (float(self.get_parameter("robot_radius").value) +
@@ -291,18 +316,31 @@ class ImperativeController(Node):
             _, commanded_world_velocity = self.algorithm.step_robot(
                 self.position, self.velocity_world, acceleration)
             self.trajectory = None
+        profile["planning"] = time.perf_counter() - stage_start
         self.publish_body_velocity(commanded_world_velocity)
+        stage_start = time.perf_counter()
+        self.publish_visualization()
+        profile["visualization"] = time.perf_counter() - stage_start
+        profile["callback_total"] = time.perf_counter() - callback_start
         if self.last_debug_log_time < 0 or now - self.last_debug_log_time >= 1_000_000_000:
             self.last_debug_log_time = now
             self.get_logger().info(
+                "timing total=%.3f s scan_points=%.3f s cluster_detection=%.3f s "
+                "tracking=%.3f s map=%.3f s planning=%.3f s visualization=%.3f s; "
+                "clusters[scan=%.3f s filter=%.3f s geometry=%.3f s count=%d detections=%d]; "
                 "planner state: pos=(%.2f, %.2f), scan_hits=%d, confirmed_tracks=%d, moving_tracks=%d, goal_yield=%s, scan_min=%s, "
                 "acc=(%.2f, %.2f), cmd_world=(%.2f, %.2f)" % (
+                    profile["callback_total"], profile["laser_scan_to_points"],
+                    profile["cluster_detection"], profile["update_tracks"],
+                    profile["update_slam_map"], profile["planning"], profile["visualization"],
+                    detection_profile["cluster_scan"], detection_profile["cluster_filter"],
+                    detection_profile["cluster_geometry"],
+                    detection_profile["initial_cluster_count"], detection_profile["detection_count"],
                     self.position[0], self.position[1], self.scan_hit_count,
                     len(self.planning_tracks), len(self.dynamic_track_ids), self.yielding_for_goal,
                     "n/a" if math.isnan(self.scan_min_range) else f"{self.scan_min_range:.2f}",
                     acceleration[0], acceleration[1],
                     commanded_world_velocity[0], commanded_world_velocity[1]))
-        self.publish_visualization()
 
     def publish_body_velocity(self, velocity_world):
         cosine, sine = math.cos(self.yaw), math.sin(self.yaw)
@@ -366,8 +404,8 @@ class ImperativeController(Node):
             marker.pose.position.x = float(track["position"][0])
             marker.pose.position.y = float(track["position"][1])
             marker.pose.orientation.w = 1.0
-            marker.scale.x = 2.0 * self.algorithm.OBSTACLE_RADIUS
-            marker.scale.y = 2.0 * self.algorithm.OBSTACLE_RADIUS
+            marker.scale.x = 2.0 * float(track["radius"])
+            marker.scale.y = 2.0 * float(track["radius"])
             marker.scale.z = 0.08
             marker.color.r, marker.color.g, marker.color.b, marker.color.a = 1.0, 0.3, 0.0, 0.8
             markers.markers.append(marker)
