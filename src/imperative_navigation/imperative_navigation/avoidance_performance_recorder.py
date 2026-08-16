@@ -9,11 +9,11 @@ import rclpy
 from geometry_msgs.msg import PoseArray, Twist
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
+from rclpy.parameter import Parameter
+from rclpy.qos import QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import LaserScan
 
-
-STATIC_CENTERS = ((-2.05, -1.18), (-3.0, 2.2))
-OBSTACLE_RADIUS = 0.30
-ROOM_LIMITS = (-4.0, 4.0, -3.2, 3.2)
+from imperative_navigation.scene_profiles import get_scene_profile
 
 
 def yaw_from_orientation(q):
@@ -51,13 +51,14 @@ class AvoidancePerformanceRecorder(Node):
         "world_vx", "world_vy", "speed", "body_ax", "body_ay", "world_ax",
         "world_ay", "acceleration", "command_world_vx", "command_world_vy",
         "velocity_error", "static_clearance", "dynamic_clearance", "wall_clearance",
-        "minimum_clearance", "goal_distance",
+        "lidar_clearance", "minimum_clearance", "goal_distance",
     )
-    OBSTACLE_FIELDS = ("stamp", "obstacle_index", "position_x", "position_y")
+    OBSTACLE_FIELDS = ("stamp", "obstacle_index", "position_x", "position_y", "radius")
 
     def __init__(self):
         super().__init__("avoidance_performance_recorder")
         self.declare_parameter("scenario", "static")
+        self.declare_parameter("scene", "imperative_m1")
         self.declare_parameter("output_dir", "/tmp/imperative_m1_performance")
         self.declare_parameter("timeout", 60.0)
         self.declare_parameter("goal_x", 2.5)
@@ -66,8 +67,12 @@ class AvoidancePerformanceRecorder(Node):
         self.declare_parameter("stop_speed", 0.10)
         self.declare_parameter("robot_radius", 0.15)
         self.declare_parameter("safety_margin", 0.15)
+        self.declare_parameter("scan_topic", "/scan")
+        self.declare_parameter("dynamic_obstacle_radii", Parameter.Type.DOUBLE_ARRAY)
 
         self.scenario = str(self.get_parameter("scenario").value)
+        self.scene = str(self.get_parameter("scene").value).strip().lower()
+        self.profile = get_scene_profile(self.scene)
         self.timeout = float(self.get_parameter("timeout").value)
         self.goal = (float(self.get_parameter("goal_x").value),
                      float(self.get_parameter("goal_y").value))
@@ -75,6 +80,8 @@ class AvoidancePerformanceRecorder(Node):
         self.stop_speed = float(self.get_parameter("stop_speed").value)
         self.robot_radius = float(self.get_parameter("robot_radius").value)
         self.safety_margin = float(self.get_parameter("safety_margin").value)
+        self.dynamic_radii = [float(value) for value in
+                              self.get_parameter("dynamic_obstacle_radii").value]
         self.output_dir = Path(str(self.get_parameter("output_dir").value))
         self.output_dir.mkdir(parents=True, exist_ok=True)
         if any(self.output_dir.iterdir()):
@@ -90,6 +97,7 @@ class AvoidancePerformanceRecorder(Node):
         self.actual_rows = []
         self.obstacle_rows = []
         self.dynamic_centers = []
+        self.latest_scan_min_range = math.inf
         self.latest_command = (0.0, 0.0)
         self.previous_command = None
         self.previous_command_stamp = None
@@ -104,6 +112,9 @@ class AvoidancePerformanceRecorder(Node):
 
         self.create_subscription(Twist, "/cmd_vel", self.command_callback, 50)
         self.create_subscription(Odometry, "/odom", self.odom_callback, 100)
+        sensor_qos = QoSProfile(depth=5, reliability=ReliabilityPolicy.BEST_EFFORT)
+        self.create_subscription(LaserScan, self.get_parameter("scan_topic").value,
+                                 self.scan_callback, sensor_qos)
         self.create_subscription(PoseArray, "/imperative/dynamic_obstacles",
                                  self.obstacle_callback, 20)
         self.create_timer(0.1, self.check_timeout)
@@ -119,14 +130,21 @@ class AvoidancePerformanceRecorder(Node):
     def now_seconds(self):
         return self.get_clock().now().nanoseconds * 1e-9
 
+    def scan_callback(self, message):
+        valid = [float(value) for value in message.ranges
+                 if math.isfinite(value) and message.range_min <= value <= message.range_max]
+        self.latest_scan_min_range = min(valid) if valid else math.inf
+
     def obstacle_callback(self, message):
         stamp = (float(message.header.stamp.sec) +
                  1e-9 * float(message.header.stamp.nanosec))
         self.dynamic_centers = [
             (float(pose.position.x), float(pose.position.y)) for pose in message.poses]
         for index, (x, y) in enumerate(self.dynamic_centers):
+            radius = (self.dynamic_radii[index]
+                      if index < len(self.dynamic_radii) else 0.20)
             row = {"stamp": stamp, "obstacle_index": index,
-                   "position_x": x, "position_y": y}
+                   "position_x": x, "position_y": y, "radius": radius}
             self.obstacle_writer.writerow(row)
             self.obstacle_rows.append(row)
         self.obstacle_handle.flush()
@@ -160,17 +178,28 @@ class AvoidancePerformanceRecorder(Node):
         self.previous_command_stamp = stamp
 
     def clearances(self, position):
-        combined_radius = self.robot_radius + OBSTACLE_RADIUS
-        static_clearance = min(
-            math.hypot(position[0] - x, position[1] - y) - combined_radius
-            for x, y in STATIC_CENTERS)
+        static_clearance = math.inf
+        for primitive in self.profile.get("static_primitives", []):
+            if primitive["shape"] == "circle":
+                clearance = (math.hypot(position[0] - primitive["center"][0],
+                                         position[1] - primitive["center"][1])
+                             - primitive["radius"] - self.robot_radius)
+            else:
+                half_x, half_y = (size / 2.0 for size in primitive["size"])
+                clearance = (max(abs(position[0] - primitive["center"][0]) - half_x,
+                                 abs(position[1] - primitive["center"][1]) - half_y,
+                                 0.0) - self.robot_radius)
+            static_clearance = min(static_clearance, clearance)
         dynamic_clearance = (min(
-            math.hypot(position[0] - x, position[1] - y) - combined_radius
-            for x, y in self.dynamic_centers) if self.dynamic_centers else math.inf)
-        xmin, xmax, ymin, ymax = ROOM_LIMITS
+            math.hypot(position[0] - x, position[1] - y) - self.robot_radius -
+            (self.dynamic_radii[index] if index < len(self.dynamic_radii) else 0.20)
+            for index, (x, y) in enumerate(self.dynamic_centers)
+        ) if self.dynamic_centers else math.inf)
+        xmin, xmax, ymin, ymax = self.profile["bounds"]
         wall_clearance = min(position[0] - xmin, xmax - position[0],
                              position[1] - ymin, ymax - position[1]) - self.robot_radius
-        return static_clearance, dynamic_clearance, wall_clearance
+        lidar_clearance = self.latest_scan_min_range - self.robot_radius
+        return static_clearance, dynamic_clearance, wall_clearance, lidar_clearance
 
     def odom_callback(self, message):
         stamp = float(message.header.stamp.sec) + 1e-9 * float(message.header.stamp.nanosec)
@@ -188,8 +217,8 @@ class AvoidancePerformanceRecorder(Node):
         body_acceleration = vector_delta(body, self.previous_actual_body, dt)
         world_acceleration = vector_delta(world, self.previous_actual_world, dt)
         command_world = body_to_world(*self.latest_command, yaw)
-        static_clearance, dynamic_clearance, wall_clearance = self.clearances(position)
-        minimum_clearance = min(static_clearance, dynamic_clearance, wall_clearance)
+        static_clearance, dynamic_clearance, wall_clearance, lidar_clearance = self.clearances(position)
+        minimum_clearance = min(static_clearance, dynamic_clearance, wall_clearance, lidar_clearance)
         goal_distance = math.hypot(position[0] - self.goal[0], position[1] - self.goal[1])
         row = {
             "stamp": stamp, "position_x": position[0], "position_y": position[1],
@@ -204,6 +233,7 @@ class AvoidancePerformanceRecorder(Node):
             "static_clearance": static_clearance,
             "dynamic_clearance": dynamic_clearance,
             "wall_clearance": wall_clearance,
+            "lidar_clearance": lidar_clearance,
             "minimum_clearance": minimum_clearance,
             "goal_distance": goal_distance,
         }
@@ -257,6 +287,7 @@ class AvoidancePerformanceRecorder(Node):
         clearance_values = finite_values([row["minimum_clearance"] for row in self.actual_rows])
         static_values = finite_values([row["static_clearance"] for row in self.actual_rows])
         dynamic_values = finite_values([row["dynamic_clearance"] for row in self.actual_rows])
+        lidar_values = finite_values([row["lidar_clearance"] for row in self.actual_rows])
         summary = {
             "scenario": self.scenario,
             "termination_reason": reason,
@@ -270,6 +301,7 @@ class AvoidancePerformanceRecorder(Node):
             "minimum_clearance_m": min(clearance_values) if clearance_values else None,
             "minimum_static_clearance_m": min(static_values) if static_values else None,
             "minimum_dynamic_clearance_m": min(dynamic_values) if dynamic_values else None,
+            "minimum_lidar_clearance_m": min(lidar_values) if lidar_values else None,
             "geometric_collision": any(value <= 0.0 for value in clearance_values),
             "safety_margin_m": self.safety_margin,
             "safety_margin_violation": any(

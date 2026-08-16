@@ -42,6 +42,7 @@ class ImperativeController(Node):
         self.declare_parameter("trajectory_heading_samples", 41)
         self.declare_parameter("trajectory_speed_samples", 4)
         self.declare_parameter("dynamic_obstacle_radius", 0.20)
+        self.declare_parameter("dynamic_obstacle_radii", Parameter.Type.DOUBLE_ARRAY)
         self.declare_parameter("track_confirmation_age", 3)
         self.declare_parameter("static_track_speed_threshold", 0.25)
         self.declare_parameter("moving_confirmation_age", 3)
@@ -51,7 +52,7 @@ class ImperativeController(Node):
         # Optional [x, y, radius, ...] obstacle list used only by the Gazebo
         # WSLg fallback when GPU LiDAR returns a saturated frame.  Leave empty
         # on a physical robot: a failed LiDAR then causes a safe stop.
-        self.declare_parameter("static_obstacles", Parameter.Type.DOUBLE_ARRAY)
+        self.declare_parameter("static_obstacles", [])
         # Gazebo can publish the exact centers of its moving obstacles.  This
         # is intentionally a simulation-only perception adapter for WSLg,
         # where the GPU LiDAR currently reports a saturated scan.
@@ -157,13 +158,16 @@ class ImperativeController(Node):
     def dynamic_obstacles_callback(self, message):
         """Accept Gazebo's simulation-truth obstacle centers in the WSLg fallback."""
         fallback_radius = float(self.get_parameter("dynamic_obstacle_radius").value)
+        configured_radii = [float(value) for value in
+                            self.get_parameter("dynamic_obstacle_radii").value]
         self.sim_dynamic_detections = [{
             "position": torch.tensor(
                 [pose.position.x, pose.position.y], dtype=torch.float32),
-            "radius": fallback_radius,
+            "radius": (configured_radii[index]
+                        if index < len(configured_radii) else fallback_radius),
             "point_count": 0,
             "nearest_range": float("nan"),
-        } for pose in message.poses]
+        } for index, pose in enumerate(message.poses)]
         self.last_dynamic_obstacles_time = self.get_clock().now().nanoseconds
 
     def have_fresh_dynamic_obstacles(self, now):
@@ -343,6 +347,9 @@ class ImperativeController(Node):
                     commanded_world_velocity[0], commanded_world_velocity[1]))
 
     def publish_body_velocity(self, velocity_world):
+        speed = float(torch.linalg.norm(velocity_world))
+        if speed > self.max_speed and speed > 1e-6:
+            velocity_world = velocity_world * (self.max_speed / speed)
         cosine, sine = math.cos(self.yaw), math.sin(self.yaw)
         command = Twist()
         command.linear.x = float(cosine * velocity_world[0] + sine * velocity_world[1])

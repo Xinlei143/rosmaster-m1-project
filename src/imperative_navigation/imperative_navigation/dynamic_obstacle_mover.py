@@ -1,8 +1,4 @@
-"""Continuously move Gazebo obstacles and publish Gazebo-measured centers.
-
-This node exists solely for the Gazebo WSLg test.  A real robot must obtain
-obstacle centers from its sensor pipeline, never from a simulator pose service.
-"""
+"""Drive the repeatable, scene-specific Gazebo dynamic obstacles."""
 
 import math
 import random
@@ -15,181 +11,153 @@ from ros_gz_interfaces.msg import Entity
 from ros_gz_interfaces.srv import SetEntityPose
 from tf2_msgs.msg import TFMessage
 
+from imperative_navigation.scene_profiles import get_scene_profile
+
 
 class DynamicObstacleMover(Node):
-    """Command three Gazebo cylinders with smooth, randomized motion."""
+    """Command primitive obstacle models and publish their measured centers."""
 
     def __init__(self):
         super().__init__("dynamic_obstacle_mover")
+        self.declare_parameter("scene", "imperative_m1")
         self.declare_parameter("control_period", 0.1)
         self.declare_parameter("random_seed", -1)
         self.declare_parameter("enabled", True)
-        self.declare_parameter("motion_mode", "continuous")
-        self.declare_parameter("pose_service", "/world/imperative_m1/set_pose")
+        self.declare_parameter("motion_mode", "auto")
+        self.declare_parameter("pose_service", "")
         self.declare_parameter("obstacle_topic", "/imperative/dynamic_obstacles")
         self.declare_parameter("pose_publish_period", 1.0 / 30.0)
         self.declare_parameter("gazebo_pose_topic", "/imperative/gazebo_dynamic_tf")
 
-        self.period = float(self.get_parameter("control_period").value)
+        self.scene = str(self.get_parameter("scene").value).strip().lower()
+        self.profile = get_scene_profile(self.scene)
+        self.period = max(0.01, float(self.get_parameter("control_period").value))
         self.enabled = bool(self.get_parameter("enabled").value)
-        self.motion_mode = str(self.get_parameter("motion_mode").value).strip().lower()
-        if self.motion_mode not in {"continuous", "random_waypoint"}:
+        configured_mode = str(self.get_parameter("motion_mode").value).strip().lower()
+        self.motion_mode = (self.profile["motion_mode"]
+                            if configured_mode in {"", "auto"} else configured_mode)
+        if self.motion_mode not in {"continuous", "route", "random_waypoint"}:
             self.get_logger().warn(
-                f"Unknown motion_mode={self.motion_mode!r}; using continuous.")
-            self.motion_mode = "continuous"
+                f"Unknown motion_mode={self.motion_mode!r}; using {self.profile['motion_mode']}.")
+            self.motion_mode = self.profile["motion_mode"]
+
         configured_seed = int(self.get_parameter("random_seed").value)
         self.seed = configured_seed if configured_seed >= 0 else time.time_ns() & 0xFFFFFFFF
         self.random = random.Random(self.seed)
-        self.room_bounds = (-3.45, 3.45, -2.65, 2.65)
-        # Continuous mode uses a smooth random-velocity process.  The target
-        # velocity changes at random intervals, while acceleration limits keep
-        # the actual motion continuous instead of producing jerky commands.
-        self.obstacles = [
-            {
-                "name": "moving_obstacle_1", "position": [2.35, 2.35],
-                "speed": 0.34, "speed_min": 0.12, "speed_max": 0.62,
-                "acceleration": 0.45,
-            },
-            {
-                "name": "moving_obstacle_2", "position": [3.10, 1.35],
-                "speed": 0.42, "speed_min": 0.15, "speed_max": 0.70,
-                "acceleration": 0.50,
-            },
-            {
-                "name": "moving_obstacle_3", "position": [2.40, 0.55],
-                "speed": 0.50, "speed_min": 0.18, "speed_max": 0.78,
-                "acceleration": 0.55,
-            },
-        ]
-        self.static_centers = [(-2.05, -1.18), (-3.0, 2.2)]
-        if self.motion_mode == "random_waypoint":
-            for index, obstacle in enumerate(self.obstacles):
-                obstacle["target"] = self.sample_approach_target(obstacle["position"], index)
-                obstacle["approaching"] = True
-        else:
-            for obstacle in self.obstacles:
-                obstacle["velocity"] = [0.0, 0.0]
-                obstacle["target_velocity"] = self.sample_random_velocity(obstacle)
-                obstacle["next_velocity_change"] = self.random.uniform(0.8, 2.2)
+        self.obstacles = self._prepare_obstacles(self.profile["obstacles"])
+        self.obstacle_names = {obstacle["name"] for obstacle in self.obstacles}
         self.motion_time = 0.0
+        self.parked = False
+        self.last_service_warning = -1
 
-        # Gazebo's VelocityControl system owns the continuous motion.  The
-        # controller sends a direction at a modest ROS rate, while Gazebo
-        # integrates that velocity at every physics step.  This avoids the
-        # old 10 Hz set_pose teleports, which were especially visible on WSLg.
+        pose_service = str(self.get_parameter("pose_service").value).strip()
+        if not pose_service:
+            pose_service = f"/world/{self.profile['world_name']}/set_pose"
+        gazebo_pose_topic = str(self.get_parameter("gazebo_pose_topic").value).strip()
+        if not gazebo_pose_topic:
+            gazebo_pose_topic = "/imperative/gazebo_dynamic_tf"
+
         self.velocity_publishers = {
             obstacle["name"]: self.create_publisher(
                 Twist, f"/model/{obstacle['name']}/cmd_vel", 10)
             for obstacle in self.obstacles
         }
-        # This service is retained only to park the models in static-only
-        # scenarios. It is never used while the obstacles are moving.
-        self.client = self.create_client(
-            SetEntityPose, self.get_parameter("pose_service").value)
+        self.client = self.create_client(SetEntityPose, pose_service)
         self.publisher = self.create_publisher(
             PoseArray, self.get_parameter("obstacle_topic").value, 10)
         self.actual_poses = {}
-        self.obstacle_names = {obstacle["name"] for obstacle in self.obstacles}
-        self.create_subscription(
-            TFMessage, self.get_parameter("gazebo_pose_topic").value,
-            self.gazebo_pose_callback, 10)
-        self.last_service_warning = -1
-        self.parked = False
+        self.create_subscription(TFMessage, gazebo_pose_topic,
+                                 self.gazebo_pose_callback, 10)
         self.create_timer(self.period, self.step)
         self.create_timer(
-            float(self.get_parameter("pose_publish_period").value), self.publish_actual_positions)
+            float(self.get_parameter("pose_publish_period").value),
+            self.publish_actual_positions)
         self.get_logger().info(
-            f"Dynamic-obstacle controller ready (enabled={self.enabled}, "
-            f"mode={self.motion_mode}, seed={self.seed}).")
+            f"Dynamic obstacles ready: scene={self.scene}, enabled={self.enabled}, "
+            f"mode={self.motion_mode}, seed={self.seed}, "
+            f"shapes={[obstacle['shape'] for obstacle in self.obstacles]}")
+
+    @staticmethod
+    def _prepare_obstacles(configured):
+        obstacles = []
+        for configured_obstacle in configured:
+            obstacle = dict(configured_obstacle)
+            obstacle["position"] = list(obstacle["position"])
+            obstacle["initial_position"] = list(obstacle["position"])
+            obstacle["park"] = list(obstacle["park"])
+            obstacle["route"] = [list(point) for point in obstacle.get("route", [])]
+            obstacle["route_index"] = 1 if len(obstacle["route"]) > 1 else 0
+            obstacle["velocity"] = [0.0, 0.0]
+            obstacle["target_velocity"] = [0.0, 0.0]
+            obstacle["yaw"] = 0.0
+            obstacles.append(obstacle)
+        return obstacles
 
     @staticmethod
     def distance(first, second):
         return math.hypot(first[0] - second[0], first[1] - second[1])
 
-    @staticmethod
-    def point_to_segment_distance(point, start, end):
-        segment_x, segment_y = end[0] - start[0], end[1] - start[1]
-        length_squared = segment_x * segment_x + segment_y * segment_y
-        if length_squared <= 1e-9:
-            return DynamicObstacleMover.distance(point, start)
-        fraction = ((point[0] - start[0]) * segment_x +
-                    (point[1] - start[1]) * segment_y) / length_squared
-        fraction = min(1.0, max(0.0, fraction))
-        closest = [start[0] + fraction * segment_x, start[1] + fraction * segment_y]
-        return DynamicObstacleMover.distance(point, closest)
+    def static_clearance(self, candidate):
+        clearance = math.inf
+        for primitive in self.profile.get("static_primitives", []):
+            if primitive["shape"] == "circle":
+                distance = self.distance(candidate, primitive["center"]) - primitive["radius"]
+            else:
+                half_x, half_y = (size / 2.0 for size in primitive["size"])
+                distance = max(
+                    abs(candidate[0] - primitive["center"][0]) - half_x,
+                    abs(candidate[1] - primitive["center"][1]) - half_y,
+                    0.0)
+            clearance = min(clearance, distance)
+        return clearance
 
-    def is_safe_target(self, current, candidate):
-        # 0.72 m is the two cylinder radii plus a small path clearance.
-        if any(self.distance(candidate, center) < 0.72 for center in self.static_centers):
+    def is_safe_position(self, candidate, obstacle):
+        min_x, max_x, min_y, max_y = self.profile["bounds"]
+        radius = float(obstacle["radius"])
+        if not (min_x + radius <= candidate[0] <= max_x - radius and
+                min_y + radius <= candidate[1] <= max_y - radius):
             return False
-        if any(self.point_to_segment_distance(center, current, candidate) < 0.72
-               for center in self.static_centers):
+        if self.static_clearance(candidate) < radius + 0.10:
             return False
-        return not any(self.distance(candidate, other["position"]) < 0.80
-                       for other in self.obstacles)
-
-    def sample_target(self, current):
-        """Sample a reachable target with collision clearance in the 8 x 6.4 m room."""
-        for _ in range(100):
-            candidate = [self.random.uniform(-3.45, 3.45), self.random.uniform(-2.65, 2.65)]
-            if self.distance(candidate, current) < 0.9:
+        for other in self.obstacles:
+            if other is obstacle:
                 continue
-            if self.is_safe_target(current, candidate):
-                return candidate
-        # A sampling failure is extremely unlikely; retain the old point so no
-        # unsafe, arbitrary jump is introduced.
-        return list(current)
+            required = radius + float(other["radius"]) + 0.10
+            if self.distance(candidate, other["position"]) < required:
+                return False
+        return True
 
     def sample_random_velocity(self, obstacle):
-        """Sample a new speed and heading for the smooth random process."""
-        speed = self.random.uniform(obstacle["speed_min"], obstacle["speed_max"])
+        speed = float(obstacle["speed"])
         heading = self.random.uniform(-math.pi, math.pi)
         return [speed * math.cos(heading), speed * math.sin(heading)]
 
-    def is_safe_motion_position(self, candidate, obstacle):
-        """Keep random motion inside the room and away from known cylinders."""
-        min_x, max_x, min_y, max_y = self.room_bounds
-        if not (min_x <= candidate[0] <= max_x and min_y <= candidate[1] <= max_y):
-            return False
-        if any(self.distance(candidate, center) < 0.72 for center in self.static_centers):
-            return False
-        return not any(
-            other is not obstacle and self.distance(candidate, other["position"]) < 0.72
-            for other in self.obstacles
-        )
-
-    def sample_approach_target(self, current, index):
-        """Randomize the first encounter in the robot's usual start-to-goal corridor."""
-        centers = [(-0.65, -1.45), (0.05, -0.85), (0.75, -0.25)]
-        center = centers[index]
-        for _ in range(100):
-            candidate = [self.random.uniform(center[0] - 0.35, center[0] + 0.35),
-                         self.random.uniform(center[1] - 0.30, center[1] + 0.30)]
-            if self.is_safe_target(current, candidate):
-                return candidate
-        return self.sample_target(current)
-
-    def send_pose(self, obstacle):
+    def send_pose(self, obstacle, position):
+        if not self.client.service_is_ready():
+            return
         request = SetEntityPose.Request()
         request.entity.name = obstacle["name"]
         request.entity.type = Entity.MODEL
-        request.pose.position.x = obstacle["position"][0]
-        request.pose.position.y = obstacle["position"][1]
-        request.pose.position.z = 0.35
+        request.pose.position.x = float(position[0])
+        request.pose.position.y = float(position[1])
+        request.pose.position.z = float(position[2])
         request.pose.orientation.w = 1.0
         self.client.call_async(request)
 
     def send_velocity(self, obstacle, velocity_x, velocity_y):
         command = Twist()
-        command.linear.x = velocity_x
-        command.linear.y = velocity_y
+        command.linear.x = float(velocity_x)
+        command.linear.y = float(velocity_y)
         self.velocity_publishers[obstacle["name"]].publish(command)
 
     def gazebo_pose_callback(self, message):
         """Store world-frame poses from Gazebo's dynamic-pose publisher."""
         for transform in message.transforms:
-            name = transform.child_frame_id
-            if name not in self.obstacle_names:
+            frame_names = {transform.child_frame_id,
+                           transform.child_frame_id.strip("/").split("/")[-1]}
+            name = next((candidate for candidate in frame_names
+                         if candidate in self.obstacle_names), None)
+            if name is None:
                 continue
             pose = Pose()
             pose.position.x = transform.transform.translation.x
@@ -199,109 +167,103 @@ class DynamicObstacleMover(Node):
             self.actual_poses[name] = pose
 
     def publish_actual_positions(self):
-        """Publish Gazebo's current model poses, not the controller estimate."""
-        if len(self.actual_poses) != len(self.obstacles):
-            return
+        """Publish measured poses, with the configured pose as startup fallback."""
         message = PoseArray()
         message.header.stamp = self.get_clock().now().to_msg()
         message.header.frame_id = "odom"
         for obstacle in self.obstacles:
-            message.poses.append(self.actual_poses[obstacle["name"]])
-        self.publisher.publish(message)
+            pose = self.actual_poses.get(obstacle["name"])
+            if pose is None:
+                pose = Pose()
+                pose.position.x, pose.position.y, pose.position.z = obstacle["position"]
+                pose.orientation.w = 1.0
+            message.poses.append(pose)
+        if self.enabled:
+            self.publisher.publish(message)
+
+    def update_route_motion(self, obstacle):
+        route = obstacle.get("route", [])
+        if len(route) < 2:
+            self.update_continuous_motion(obstacle)
+            return
+        target = route[obstacle["route_index"]]
+        offset_x = target[0] - obstacle["position"][0]
+        offset_y = target[1] - obstacle["position"][1]
+        distance = math.hypot(offset_x, offset_y)
+        travel = float(obstacle["speed"]) * self.period
+        if distance <= max(travel, 1e-6):
+            obstacle["position"][0] = target[0]
+            obstacle["position"][1] = target[1]
+            obstacle["route_index"] = (obstacle["route_index"] + 1) % len(route)
+            self.send_velocity(obstacle, 0.0, 0.0)
+            return
+        velocity = [float(obstacle["speed"]) * offset_x / distance,
+                    float(obstacle["speed"]) * offset_y / distance]
+        candidate = [obstacle["position"][0] + velocity[0] * self.period,
+                     obstacle["position"][1] + velocity[1] * self.period]
+        if not self.is_safe_position(candidate, obstacle):
+            self.send_velocity(obstacle, 0.0, 0.0)
+            return
+        obstacle["position"][0], obstacle["position"][1] = candidate
+        self.send_velocity(obstacle, velocity[0], velocity[1])
 
     def update_continuous_motion(self, obstacle):
-        """Vary speed and heading smoothly while respecting the room bounds."""
-        if self.motion_time >= obstacle["next_velocity_change"]:
+        if self.motion_time >= obstacle.get("next_velocity_change", 0.0):
             obstacle["target_velocity"] = self.sample_random_velocity(obstacle)
-            obstacle["next_velocity_change"] = (
-                self.motion_time + self.random.uniform(0.8, 2.8))
-
+            obstacle["next_velocity_change"] = self.motion_time + self.random.uniform(0.8, 2.8)
         velocity_x, velocity_y = obstacle["velocity"]
         target_x, target_y = obstacle["target_velocity"]
         delta_x, delta_y = target_x - velocity_x, target_y - velocity_y
         delta_norm = math.hypot(delta_x, delta_y)
-        max_delta = obstacle["acceleration"] * self.period
+        max_delta = float(obstacle["acceleration"]) * self.period
         if delta_norm <= max_delta:
             velocity_x, velocity_y = target_x, target_y
         elif delta_norm > 1e-9:
             scale = max_delta / delta_norm
             velocity_x += scale * delta_x
             velocity_y += scale * delta_y
-
-        candidate = [
-            obstacle["position"][0] + velocity_x * self.period,
-            obstacle["position"][1] + velocity_y * self.period,
-        ]
-        min_x, max_x, min_y, max_y = self.room_bounds
+        candidate = [obstacle["position"][0] + velocity_x * self.period,
+                     obstacle["position"][1] + velocity_y * self.period]
+        min_x, max_x, min_y, max_y = self.profile["bounds"]
         if candidate[0] < min_x or candidate[0] > max_x:
-            candidate[0] = min(max(candidate[0], min_x), max_x)
             velocity_x = -velocity_x
-            target_x = -target_x
+            candidate[0] = min(max(candidate[0], min_x), max_x)
         if candidate[1] < min_y or candidate[1] > max_y:
-            candidate[1] = min(max(candidate[1], min_y), max_y)
             velocity_y = -velocity_y
-            target_y = -target_y
-        obstacle["target_velocity"] = [target_x, target_y]
-
-        if not self.is_safe_motion_position(candidate, obstacle):
-            # Turn away smoothly when a static or another dynamic obstacle is
-            # reached. Keep the old position if the one-step turn is blocked.
-            velocity_x, velocity_y = -0.7 * velocity_x, -0.7 * velocity_y
+            candidate[1] = min(max(candidate[1], min_y), max_y)
+        if not self.is_safe_position(candidate, obstacle):
+            velocity_x, velocity_y = 0.0, 0.0
+            candidate = list(obstacle["position"])
             obstacle["target_velocity"] = self.sample_random_velocity(obstacle)
-            candidate = [
-                obstacle["position"][0] + velocity_x * self.period,
-                obstacle["position"][1] + velocity_y * self.period,
-            ]
-            if not self.is_safe_motion_position(candidate, obstacle):
-                candidate = list(obstacle["position"])
-
         obstacle["velocity"] = [velocity_x, velocity_y]
         obstacle["position"] = candidate
         self.send_velocity(obstacle, velocity_x, velocity_y)
 
+    def park_obstacles(self):
+        if self.parked:
+            return
+        if not self.client.service_is_ready():
+            now = self.get_clock().now().nanoseconds
+            if self.last_service_warning < 0 or now - self.last_service_warning >= 1_000_000_000:
+                self.last_service_warning = now
+                self.get_logger().warn("Waiting for Gazebo set_pose service to park obstacles.")
+            return
+        for obstacle in self.obstacles:
+            self.send_velocity(obstacle, 0.0, 0.0)
+            obstacle["position"] = list(obstacle["park"])
+            self.send_pose(obstacle, obstacle["park"])
+        self.parked = True
+        self.get_logger().info("Dynamic obstacles parked for the static-only scenario.")
+
     def step(self):
         if not self.enabled:
-            # Keep the dynamic models from contaminating a static-only test.
-            # They remain in the shared SDF but are parked outside the room and
-            # an empty truth message is published for the software lidar/logger.
-            if not self.parked:
-                if not self.client.service_is_ready():
-                    now = self.get_clock().now().nanoseconds
-                    if self.last_service_warning < 0 or now - self.last_service_warning >= 1_000_000_000:
-                        self.last_service_warning = now
-                        self.get_logger().warn("Waiting for Gazebo /set_pose service bridge to park obstacles.")
-                    return
-                for index, obstacle in enumerate(self.obstacles):
-                    self.send_velocity(obstacle, 0.0, 0.0)
-                    obstacle["position"] = [10.0 + index, 10.0]
-                    self.send_pose(obstacle)
-                self.parked = True
-                self.get_logger().info("Dynamic obstacles parked for the static-only scenario.")
-            message = PoseArray()
-            message.header.stamp = self.get_clock().now().to_msg()
-            message.header.frame_id = "odom"
-            self.publisher.publish(message)
+            self.park_obstacles()
             return
-
         for obstacle in self.obstacles:
-            if self.motion_mode == "continuous":
-                self.update_continuous_motion(obstacle)
+            if self.motion_mode == "route":
+                self.update_route_motion(obstacle)
             else:
-                offset_x = obstacle["target"][0] - obstacle["position"][0]
-                offset_y = obstacle["target"][1] - obstacle["position"][1]
-                distance = math.hypot(offset_x, offset_y)
-                travel = obstacle["speed"] * self.period
-                if distance <= travel:
-                    obstacle["position"] = list(obstacle["target"])
-                    self.send_velocity(obstacle, 0.0, 0.0)
-                    obstacle["target"] = self.sample_target(obstacle["position"])
-                    obstacle["approaching"] = False
-                else:
-                    velocity_x = obstacle["speed"] * offset_x / distance
-                    velocity_y = obstacle["speed"] * offset_y / distance
-                    self.send_velocity(obstacle, velocity_x, velocity_y)
-                    obstacle["position"][0] += velocity_x * self.period
-                    obstacle["position"][1] += velocity_y * self.period
+                self.update_continuous_motion(obstacle)
         self.motion_time += self.period
 
 
