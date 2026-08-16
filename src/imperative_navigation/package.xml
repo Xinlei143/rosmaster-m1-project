@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>imperative_navigation</name>
+  <version>0.1.0</version>
+  <description>ROS 2 adapters for the imperative moving-obstacle planner in Gazebo Sim and on Rosmaster M1.</description>
+  <maintainer email="user@example.com">Rosmaster user</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>rclpy</depend>
+  <depend>ros_gz_bridge</depend>
+  <depend>ros_gz_interfaces</depend>
+  <depend>ros_gz_sim</depend>
+  <depend>sensor_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>visualization_msgs</depend>
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>imperative_m1_description</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
