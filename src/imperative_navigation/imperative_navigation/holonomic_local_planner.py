@@ -17,8 +17,12 @@ def goal_is_dynamically_blocked(goal, tracks, robot_clearance, dynamic_radius):
     if not moving:
         return False
     centres = torch.stack([track["position"] for track in moving]).to(goal)
-    blocked_distance = float(robot_clearance) + float(dynamic_radius) + 0.08
-    return bool(torch.any(torch.linalg.norm(centres - goal[None], dim=1) <= blocked_distance))
+    radii = torch.tensor(
+        [track.get("radius", dynamic_radius) for track in moving],
+        dtype=goal.dtype, device=goal.device)
+    blocked_distances = float(robot_clearance) + radii + 0.08
+    return bool(torch.any(
+        torch.linalg.norm(centres - goal[None], dim=1) <= blocked_distances))
 
 
 def choose_velocity(position, velocity, goal, obstacle_points, tracks, *, max_speed,
@@ -75,24 +79,29 @@ def choose_velocity(position, velocity, goal, obstacle_points, tracks, *, max_sp
     if tracks:
         centres = torch.stack([track["position"] for track in tracks]).to(device=device, dtype=dtype)
         velocities = torch.stack([track["velocity"] for track in tracks]).to(device=device, dtype=dtype)
+        radii = torch.tensor(
+            [track.get("radius", dynamic_radius) for track in tracks],
+            device=device, dtype=dtype)
         times = torch.arange(1, horizon + 1, device=device, dtype=dtype) * float(dt)
         future_centres = centres[None] + times[:, None, None] * velocities[None]
-        distances = torch.linalg.norm(future_centres[None] - predicted_positions[:, :, None], dim=3)
-        dynamic_clearance = float(robot_clearance) + float(dynamic_radius)
-        min_clearance = torch.minimum(min_clearance, distances.amin(dim=(1, 2)) - float(dynamic_radius))
-        obstacle_cost += 100.0 * torch.sum(torch.relu(dynamic_clearance + 0.12 - distances) ** 2,
-                                           dim=(1, 2))
+        centre_distances = torch.linalg.norm(
+            future_centres[None] - predicted_positions[:, :, None], dim=3)
+        surface_distances = centre_distances - radii[None, None]
+        min_clearance = torch.minimum(min_clearance, surface_distances.amin(dim=(1, 2)))
+        obstacle_cost += 100.0 * torch.sum(
+            torch.relu(float(robot_clearance) + 0.12 - surface_distances) ** 2,
+            dim=(1, 2))
 
     collision = min_clearance < float(robot_clearance)
-    endpoint_cost = 7.0 * torch.sum((predicted_positions[:, -1] - goal) ** 2, dim=1)
+    endpoint_cost = 3.0 * torch.sum((predicted_positions[:, -1] - goal) ** 2, dim=1)
     reference_velocity = velocity if reference_velocity is None else reference_velocity
     # This is the trajectory hysteresis term: nearby candidate velocities
     # cost less than a left/right reversal, so sensor noise cannot make the
     # M1 alternate between escape directions on adjacent frames.
-    velocity_change_cost = 4.0 * torch.sum((target_velocities - reference_velocity[None]) ** 2, dim=1)
+    velocity_change_cost = 1.0 * torch.sum((target_velocities - reference_velocity[None]) ** 2, dim=1)
     # Prefer forward progress when two paths have equivalent clearance, but
     # do not force forward motion if the safe curve initially needs side-slip.
-    progress_weight = 0.15 if yielding else 1.5
+    progress_weight = 0.00 if yielding else 0.5
     progress_cost = -progress_weight * torch.sum((predicted_positions[:, -1] - position[None]) *
                                      (goal_offset / goal_distance)[None], dim=1)
     total_cost = endpoint_cost + velocity_change_cost + progress_cost + obstacle_cost

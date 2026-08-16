@@ -25,6 +25,7 @@ Visualization Manager:
       Topic: /imperative/tracks
       Value: true
     - Class: rviz_default_plugins/Odometry
+      Keep: 1
       Name: M1 odometry
       Topic: /odom
       Value: true

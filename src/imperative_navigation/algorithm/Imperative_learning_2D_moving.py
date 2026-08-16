@@ -70,19 +70,26 @@ FORWARD_CLEARANCE_COSINE = float(torch.cos(torch.tensor(torch.pi / 4.0)))
 LIDAR_ANGLES = torch.arange(LIDAR_POINTS) * 2.0 * torch.pi / LIDAR_POINTS - torch.pi  # rad, beam angles
 
 CLUSTER_GAP = 0.30  # m, cluster separation
-CIRCLE_FIT_MAX_ERROR = 0.02  # m, radius residual
-CIRCLE_SPLIT_IMPROVEMENT = 0.50  # ratio, split acceptance
+CLUSTER_MIN_POINTS = 3
+CLUSTER_MAX_SPAN = 1.20  # m, reject wall/large-structure clusters from tracking
+CLUSTER_RADIUS_MARGIN = 0.08  # m, cover unseen/noisy target extent
+CLUSTER_MIN_RADIUS = 0.10  # m
+CLUSTER_MAX_RADIUS = 0.60  # m
+CLUSTER_RADIUS_QUANTILE = 0.90
 MAP_RESOLUTION = 0.10  # m, voxel size
 MAP_DYNAMIC_MARGIN = 0.15  # m, moving-point removal
 MAX_MAP_POINTS = 2000  # points
 TRACK_ASSOCIATION_DISTANCE = 0.80  # m
 TRACK_MAX_MISSED = 5  # scans
 STATIC_SPEED_THRESHOLD = 0.15  # m/s
-VELOCITY_SMOOTHING = 0.25  # estimate weight
 MAX_ESTIMATED_SPEED = 1.0  # m/s
-MAX_ESTIMATED_ACCELERATION = 0.8  # m/s^2, velocity rate
+KF_PROCESS_ACCELERATION_STD = 0.8  # m/s^2
+KF_MEASUREMENT_POSITION_STD = 0.08  # m
+KF_INITIAL_POSITION_STD = 0.08  # m
+KF_INITIAL_VELOCITY_STD = 0.50  # m/s
+TRACK_RADIUS_SMOOTHING = 0.35
 
-PLAN_HORIZON = 15  # steps
+PLAN_HORIZON = 20  # steps (2 s at the default 0.1 s control period)
 PLAN_HEADINGS = 36  # directions
 PLAN_ACCELERATIONS = torch.tensor([0.25, 0.50, 1.00])  # m/s^2
 COLLISION_COST = 100000.0  # collision weight
@@ -227,134 +234,15 @@ def simulate_lidar(robot_position, time_index):
 
 
 # ============================================================
-# Pose-aided point-cloud mapping and consecutive-scan motion estimation
+# Pose-aided point-cloud mapping and Kalman multi-object tracking
 # ============================================================
 
-def _fit_circle_lstsq_points(points):
-    """Original algebraic circle fit, retained as the numerical fallback."""
-    points = points.double()
-    origin = torch.mean(points, dim=0)
-    centered_points = points - origin
-    circle_matrix = torch.cat(
-        [2.0 * centered_points, torch.ones(len(points), 1, dtype=torch.double)], dim=1)
-    circle_vector = torch.sum(centered_points ** 2, dim=1)
-    center = torch.linalg.lstsq(circle_matrix, circle_vector).solution[:2] + origin
-    fit_error = torch.mean(
-        torch.abs(torch.linalg.norm(points - center, dim=1) - OBSTACLE_RADIUS)).item()
-    return center.float(), fit_error
+def scan_to_cluster_detections(robot_position, lidar_points, lidar_hits, profile=None):
+    """Return compact-object detections directly from adjacent laser clusters.
 
-
-def _split_candidate_indices(cluster_size, device=None):
-    """Return the exact candidate sequence from ``range(3, N - 2)``.
-
-    A split at index ``k`` creates ``points[:k]`` and ``points[k:]``.  The
-    original Python loop allowed only k = 3 .. N - 3, so both child clusters
-    contain at least three points.  Python's ``range`` returns an empty
-    sequence when this interval does not exist; unlike it, ``torch.arange``
-    raises for a positive step with end < start.  Construct from the known
-    candidate count instead, so N <= 5 is an explicit, safe empty set.
-    """
-    candidate_count = max(0, int(cluster_size) - 5)
-    if candidate_count == 0:
-        return torch.empty(0, dtype=torch.long, device=device)
-    return torch.arange(candidate_count, dtype=torch.long, device=device) + 3
-
-
-def _split_circle_errors_reference(points, split_indices):
-    """Reference split errors, byte-for-byte equivalent to the former loop."""
-    errors = []
-    for split_index in split_indices.tolist():
-        _, first_error = _fit_circle_lstsq_points(points[:split_index])
-        _, second_error = _fit_circle_lstsq_points(points[split_index:])
-        errors.append((split_index * first_error +
-                       (len(points) - split_index) * second_error) / len(points))
-    return torch.tensor(errors, dtype=torch.double)
-
-
-def _split_circle_errors_prefix(points, split_indices, return_fallback_count=False):
-    """Compute all split errors from prefix moments, with lstsq fallback.
-
-    For centered coordinates q, the original least-squares system is
-    [2*qx, 2*qy, 1] * theta = qx² + qy².  Its normal equations give
-    center_offset = 0.5 * inv(C) * [sum(qx*r²), sum(qy*r²)], where C is the
-    2x2 centered second-moment matrix. Prefix sums of raw moments through
-    degree three provide C and the right-hand side for every prefix/suffix in
-    O(1). The residual remains the original mean absolute radial residual.
-    """
-    if not len(split_indices):
-        result = torch.empty(0, dtype=torch.double)
-        return (result, 0) if return_fallback_count else result
-
-    points = points.double()
-    x, y = points[:, 0], points[:, 1]
-    raw_stats = torch.stack((
-        torch.ones_like(x), x, y, x * x, y * y, x * y,
-        x * x * x, y * y * y, x * x * y, x * y * y,
-    ), dim=1)
-    prefix = torch.cat((torch.zeros(1, raw_stats.shape[1], dtype=torch.double),
-                        torch.cumsum(raw_stats, dim=0)), dim=0)
-    left_stats = prefix[split_indices]
-    right_stats = prefix[-1] - left_stats
-
-    def centers_from_stats(stats):
-        count, sx, sy, sxx, syy, sxy, sx3, sy3, sx2y, sxy2 = stats.unbind(dim=1)
-        mean_x, mean_y = sx / count, sy / count
-        cxx = sxx - sx * mean_x
-        cyy = syy - sy * mean_y
-        cxy = sxy - sx * mean_y
-
-        cxxx = sx3 - 3.0 * mean_x * sxx + 3.0 * mean_x * mean_x * sx - count * mean_x ** 3
-        cyyy = sy3 - 3.0 * mean_y * syy + 3.0 * mean_y * mean_y * sy - count * mean_y ** 3
-        cxxy = (sx2y - 2.0 * mean_x * sxy + mean_x * mean_x * sy - mean_y * sxx +
-                2.0 * mean_x * mean_y * sx - count * mean_x * mean_x * mean_y)
-        cxyy = (sxy2 - 2.0 * mean_y * sxy + mean_y * mean_y * sx - mean_x * syy +
-                2.0 * mean_x * mean_y * sy - count * mean_x * mean_y * mean_y)
-
-        rhs_x = 0.5 * (cxxx + cxyy)
-        rhs_y = 0.5 * (cxxy + cyyy)
-        determinant = cxx * cyy - cxy * cxy
-        scale = (cxx.abs() + cyy.abs()).clamp_min(torch.finfo(torch.double).eps)
-        well_conditioned = (torch.isfinite(determinant) & torch.isfinite(rhs_x) &
-                            torch.isfinite(rhs_y) &
-                            (determinant.abs() > 1e-5 * scale * scale))
-        offset_x = (cyy * rhs_x - cxy * rhs_y) / determinant
-        offset_y = (cxx * rhs_y - cxy * rhs_x) / determinant
-        centers = torch.stack((mean_x + offset_x, mean_y + offset_y), dim=1)
-        return centers, well_conditioned
-
-    left_centers, left_valid = centers_from_stats(left_stats)
-    right_centers, right_valid = centers_from_stats(right_stats)
-    sample_indices = torch.arange(len(points))
-    residual_left = torch.abs(
-        torch.linalg.norm(points[None, :, :] - left_centers[:, None, :], dim=2) - OBSTACLE_RADIUS)
-    residual_right = torch.abs(
-        torch.linalg.norm(points[None, :, :] - right_centers[:, None, :], dim=2) - OBSTACLE_RADIUS)
-    left_mask = sample_indices[None, :] < split_indices[:, None]
-    right_mask = ~left_mask
-    left_errors = torch.sum(residual_left * left_mask, dim=1) / split_indices
-    right_counts = len(points) - split_indices
-    right_errors = torch.sum(residual_right * right_mask, dim=1) / right_counts
-    split_errors = (split_indices * left_errors + right_counts * right_errors) / len(points)
-
-    # The normal-equation solve is deliberately rejected for poorly
-    # conditioned prefixes/suffixes. Those candidates use the original QR/SVD
-    # backed torch.linalg.lstsq path and therefore preserve degenerate cases.
-    fallback_indices = torch.where(~(left_valid & right_valid))[0].tolist()
-    for candidate_index in fallback_indices:
-        split_index = int(split_indices[candidate_index])
-        _, left_error = _fit_circle_lstsq_points(points[:split_index])
-        _, right_error = _fit_circle_lstsq_points(points[split_index:])
-        split_errors[candidate_index] = (
-            split_index * left_error + (len(points) - split_index) * right_error) / len(points)
-    return (split_errors, len(fallback_indices)) if return_fallback_count else split_errors
-
-
-def scan_to_detections(robot_position, lidar_points, lidar_hits, profile=None,
-                       split_fit_strategy="optimized"):
-    """Cluster laser returns and fit circular obstacle detections.
-
-    When ``profile`` is a dict, timing and count diagnostics are populated
-    without changing the clustering or fitting calculations.
+    Raw world points are always returned for collision checking. Clusters that
+    are too small or span more than ``CLUSTER_MAX_SPAN`` remain in that raw
+    cloud but are not sent to the dynamic-object tracker.
     """
     profiling = profile is not None
     if profiling:
@@ -363,17 +251,14 @@ def scan_to_detections(robot_position, lidar_points, lidar_hits, profile=None,
             "prepare": 0.0,
             "cluster_scan": 0.0,
             "cluster_wrap": 0.0,
-            "pending_clusters_total": 0.0,
-            "circle_fit_primary": 0.0,
-            "circle_fit_split": 0.0,
-            "split_search": 0.0,
+            "cluster_geometry": 0.0,
+            "cluster_filter": 0.0,
             "finalize": 0.0,
             "hit_count": 0,
             "initial_cluster_count": 0,
-            "primary_fit_calls": 0,
-            "split_fit_calls": 0,
-            "split_candidates": 0,
-            "split_lstsq_fallbacks": 0,
+            "detection_count": 0,
+            "small_cluster_count": 0,
+            "large_cluster_count": 0,
         })
 
     stage_start = time.perf_counter() if profiling else None
@@ -389,7 +274,7 @@ def scan_to_detections(robot_position, lidar_points, lidar_hits, profile=None,
         world_clusters = [point[None] for point in world_points]
         if profiling:
             profile["finalize"] = time.perf_counter() - stage_start
-        return torch.empty(0, 2), world_points, world_clusters
+        return [], world_points, world_clusters
 
     clusters = []
     cluster_start = 0
@@ -421,139 +306,179 @@ def scan_to_detections(robot_position, lidar_points, lidar_hits, profile=None,
     if profiling:
         profile["cluster_wrap"] = time.perf_counter() - stage_start
 
-    def fit_circle(cluster, fit_stage):
-        fit_start = time.perf_counter() if profiling else None
-        center, fit_error = _fit_circle_lstsq_points(cluster + robot_position)
-        if profiling:
-            profile[fit_stage] += time.perf_counter() - fit_start
-            if fit_stage == "circle_fit_primary":
-                profile["primary_fit_calls"] += 1
-            else:
-                profile["split_fit_calls"] += 1
-        return center.float(), fit_error
-
     detections = []
-    entity_clusters = []
-    pending_clusters = clusters.copy()
-
-    pending_start = time.perf_counter() if profiling else None
-    while pending_clusters:
-        cluster = pending_clusters.pop(0)
-
-        if len(cluster) < 3:
-            entity_clusters.extend([point[None] + robot_position for point in cluster])
-            continue
-
-        center, fit_error = fit_circle(cluster, "circle_fit_primary")
-
-        if fit_error <= CIRCLE_FIT_MAX_ERROR:
-            detections.append(center)
-            entity_clusters.append(cluster + robot_position)
-            continue
-
-        best_split = None
-        best_error = fit_error
-
-        split_start = time.perf_counter() if profiling else None
-        cluster_points = cluster + robot_position
-        # This is exactly ``list(range(3, len(cluster) - 2))`` from the
-        # former implementation, including its empty result for N <= 5.
-        split_indices = _split_candidate_indices(len(cluster), cluster_points.device)
-        split_fit_start = time.perf_counter() if profiling else None
-        if split_fit_strategy == "optimized":
-            split_errors, fallback_count = _split_circle_errors_prefix(
-                cluster_points, split_indices, return_fallback_count=True)
-        elif split_fit_strategy == "reference":
-            split_errors = _split_circle_errors_reference(cluster_points, split_indices)
-            fallback_count = len(split_indices)
-        else:
-            raise ValueError(f"Unknown split_fit_strategy: {split_fit_strategy}")
-        if profiling:
-            profile["circle_fit_split"] += time.perf_counter() - split_fit_start
-            profile["split_fit_calls"] += 2 * len(split_indices)
-            profile["split_lstsq_fallbacks"] += fallback_count
-
-        for candidate_index, split_index in enumerate(split_indices.tolist()):
-            split_error = float(split_errors[candidate_index])
-
-            if split_error < best_error:
-                best_error = split_error
-                best_split = split_index
+    world_clusters = []
+    for cluster in clusters:
+        world_cluster = cluster + robot_position
+        world_clusters.append(world_cluster)
+        filter_start = time.perf_counter() if profiling else None
+        if len(cluster) < CLUSTER_MIN_POINTS:
             if profiling:
-                profile["split_candidates"] += 1
+                profile["small_cluster_count"] += 1
+                profile["cluster_filter"] += time.perf_counter() - filter_start
+            continue
+        extents = torch.amax(cluster, dim=0) - torch.amin(cluster, dim=0)
+        span = float(torch.linalg.norm(extents))
+        if span > CLUSTER_MAX_SPAN:
+            if profiling:
+                profile["large_cluster_count"] += 1
+                profile["cluster_filter"] += time.perf_counter() - filter_start
+            continue
         if profiling:
-            profile["split_search"] += time.perf_counter() - split_start
+            profile["cluster_filter"] += time.perf_counter() - filter_start
 
-        if best_split is not None and best_error < CIRCLE_SPLIT_IMPROVEMENT * fit_error:
-            pending_clusters = [cluster[:best_split], cluster[best_split:]] + pending_clusters
-        else:
-            entity_clusters.extend([point[None] + robot_position for point in cluster])
-    if profiling:
-        profile["pending_clusters_total"] = time.perf_counter() - pending_start
+        geometry_start = time.perf_counter() if profiling else None
+        center = torch.mean(world_cluster, dim=0)
+        radial_distances = torch.linalg.norm(world_cluster - center, dim=1)
+        radius = float(torch.quantile(radial_distances, CLUSTER_RADIUS_QUANTILE))
+        radius = min(CLUSTER_MAX_RADIUS,
+                     max(CLUSTER_MIN_RADIUS, radius + CLUSTER_RADIUS_MARGIN))
+        detections.append({
+            "position": center,
+            "radius": radius,
+            "point_count": len(cluster),
+            "nearest_range": float(torch.amin(torch.linalg.norm(cluster, dim=1))),
+        })
+        if profiling:
+            profile["cluster_geometry"] += time.perf_counter() - geometry_start
 
     stage_start = time.perf_counter() if profiling else None
-    detection_tensor = torch.stack(detections) if detections else torch.empty(0, 2)
     if profiling:
         profile["finalize"] = time.perf_counter() - stage_start
-    return detection_tensor, world_points, entity_clusters
+        profile["detection_count"] = len(detections)
+    return detections, world_points, world_clusters
 
 
-def update_slam_map(map_points, world_points, dynamic_centers):
+def update_slam_map(map_points, world_points, dynamic_centers, dynamic_radii=None):
     points = torch.cat([map_points, world_points]) if len(map_points) else world_points.clone()
 
     if len(points) == 0:
         return torch.empty(0, 2)
 
     if len(dynamic_centers):
-        points = points[torch.all(torch.cdist(points, dynamic_centers) > OBSTACLE_RADIUS + MAP_DYNAMIC_MARGIN, dim=1)]
+        if dynamic_radii is None:
+            dynamic_radii = torch.full(
+                (len(dynamic_centers),), OBSTACLE_RADIUS,
+                dtype=dynamic_centers.dtype, device=dynamic_centers.device)
+        else:
+            dynamic_radii = torch.as_tensor(
+                dynamic_radii, dtype=dynamic_centers.dtype, device=dynamic_centers.device)
+        removal_distances = dynamic_radii + MAP_DYNAMIC_MARGIN
+        points = points[torch.all(
+            torch.cdist(points, dynamic_centers) > removal_distances[None], dim=1)]
 
     voxel_points = torch.unique(torch.round(points / MAP_RESOLUTION) * MAP_RESOLUTION, dim=0)
     return voxel_points[-MAX_MAP_POINTS:]
 
 
-def update_tracks(tracks, detections, next_track_id):
+def _kalman_transition(dt, *, dtype, device):
+    transition = torch.eye(4, dtype=dtype, device=device)
+    transition[0, 2] = transition[1, 3] = dt
+    return transition
+
+
+def _kalman_process_covariance(dt, *, dtype, device):
+    dt2, dt3, dt4 = dt * dt, dt * dt * dt, dt * dt * dt * dt
+    variance = KF_PROCESS_ACCELERATION_STD ** 2
+    return variance * torch.tensor([
+        [0.25 * dt4, 0.0, 0.5 * dt3, 0.0],
+        [0.0, 0.25 * dt4, 0.0, 0.5 * dt3],
+        [0.5 * dt3, 0.0, dt2, 0.0],
+        [0.0, 0.5 * dt3, 0.0, dt2],
+    ], dtype=dtype, device=device)
+
+
+def _predict_track(track, dt):
+    state = track["state"]
+    transition = _kalman_transition(dt, dtype=state.dtype, device=state.device)
+    covariance = (transition @ track["covariance"] @ transition.T +
+                  _kalman_process_covariance(dt, dtype=state.dtype, device=state.device))
+    return transition @ state, covariance
+
+
+def _update_track_state(state, covariance, measurement):
+    measurement_variance = KF_MEASUREMENT_POSITION_STD ** 2
+    innovation_covariance = covariance[:2, :2] + measurement_variance * torch.eye(
+        2, dtype=state.dtype, device=state.device)
+    kalman_gain = torch.linalg.solve(
+        innovation_covariance, covariance[:, :2].T).T
+    updated_state = state + kalman_gain @ (measurement - state[:2])
+    identity_minus_gain = torch.eye(4, dtype=state.dtype, device=state.device)
+    identity_minus_gain[:, :2] -= kalman_gain
+    measurement_covariance = measurement_variance * torch.eye(
+        2, dtype=state.dtype, device=state.device)
+    updated_covariance = (identity_minus_gain @ covariance @ identity_minus_gain.T +
+                          kalman_gain @ measurement_covariance @ kalman_gain.T)
+    speed = torch.linalg.norm(updated_state[2:])
+    updated_state[2:] *= torch.clamp(
+        MAX_ESTIMATED_SPEED / speed.clamp_min(1e-6), max=1.0)
+    return updated_state, updated_covariance
+
+
+def _track_record(track, state, covariance, *, radius, missed):
+    position = state[:2].clone()
+    return {
+        "id": track["id"], "state": state, "covariance": covariance,
+        "position": position, "velocity": state[2:].clone(), "radius": float(radius),
+        "age": track["age"] + 1, "missed": missed,
+        "history": track["history"] + [position],
+    }
+
+
+def _new_track(detection, track_id):
+    position = detection["position"]
+    state = torch.cat((position, torch.zeros(2, dtype=position.dtype, device=position.device)))
+    covariance = torch.diag(torch.tensor([
+        KF_INITIAL_POSITION_STD ** 2, KF_INITIAL_POSITION_STD ** 2,
+        KF_INITIAL_VELOCITY_STD ** 2, KF_INITIAL_VELOCITY_STD ** 2,
+    ], dtype=position.dtype, device=position.device))
+    return {
+        "id": track_id, "state": state, "covariance": covariance,
+        "position": position.clone(), "velocity": state[2:].clone(),
+        "radius": float(detection["radius"]), "age": 1, "missed": 0,
+        "history": [position.clone()],
+    }
+
+
+def update_tracks(tracks, detections, next_track_id, dt=None):
+    """Predict, globally associate, and update constant-velocity KF tracks."""
+    dt = float(DT if dt is None else dt)
+    predictions = [_predict_track(track, dt) for track in tracks]
+    matched_tracks, matched_detections = {}, set()
+
+    if tracks and detections:
+        predicted_positions = torch.stack([state[:2] for state, _ in predictions])
+        detection_positions = torch.stack([detection["position"] for detection in detections])
+        distances = torch.cdist(predicted_positions, detection_positions)
+        for flat_index in torch.argsort(distances.flatten()).tolist():
+            track_index = flat_index // len(detections)
+            detection_index = flat_index % len(detections)
+            if float(distances[track_index, detection_index]) > TRACK_ASSOCIATION_DISTANCE:
+                break
+            if track_index in matched_tracks or detection_index in matched_detections:
+                continue
+            matched_tracks[track_index] = detection_index
+            matched_detections.add(detection_index)
+
     updated_tracks = []
-    used_detections = set()
-
-    for track in tracks:
-        predicted_position = track["position"] + DT * track["velocity"]
-        matched_index = None
-
-        if len(detections):
-            association_distances = torch.linalg.norm(detections - predicted_position, dim=1)
-
-            for used_index in used_detections:
-                association_distances[used_index] = torch.inf
-
-            nearest_index = int(torch.argmin(association_distances))
-
-            if association_distances[nearest_index] <= TRACK_ASSOCIATION_DISTANCE:
-                matched_index = nearest_index
-
-        if matched_index is not None:
-            detection = detections[matched_index]
-            measured_velocity = (detection - track["last_detection"]) / (DT * (track["missed"] + 1))
-            target_velocity = measured_velocity if track["age"] == 1 else VELOCITY_SMOOTHING * measured_velocity + (1.0 - VELOCITY_SMOOTHING) * track["velocity"]
-            velocity_change = target_velocity - track["velocity"]
-            maximum_change = MAX_ESTIMATED_ACCELERATION * DT * (track["missed"] + 1)
-            velocity_change *= torch.clamp(maximum_change / torch.linalg.norm(velocity_change).clamp_min(1e-6), max=1.0)
-            velocity = track["velocity"] + velocity_change
-            velocity *= torch.clamp(MAX_ESTIMATED_SPEED / torch.linalg.norm(velocity).clamp_min(1e-6), max=1.0)
-            updated_tracks.append(
-                {"id": track["id"], "position": detection, "velocity": velocity, "age": track["age"] + 1, "missed": 0,
-                 "last_detection": detection, "history": track["history"] + [detection.clone()]})
-            used_detections.add(matched_index)
+    for track_index, track in enumerate(tracks):
+        predicted_state, predicted_covariance = predictions[track_index]
+        if track_index in matched_tracks:
+            detection = detections[matched_tracks[track_index]]
+            state, covariance = _update_track_state(
+                predicted_state, predicted_covariance, detection["position"])
+            radius = (TRACK_RADIUS_SMOOTHING * float(detection["radius"]) +
+                      (1.0 - TRACK_RADIUS_SMOOTHING) * float(track["radius"]))
+            updated_tracks.append(_track_record(
+                track, state, covariance, radius=radius, missed=0))
         elif track["missed"] < TRACK_MAX_MISSED:
-            updated_tracks.append({"id": track["id"], "position": predicted_position, "velocity": track["velocity"],
-                                   "age": track["age"] + 1, "missed": track["missed"] + 1,
-                                   "last_detection": track["last_detection"],
-                                   "history": track["history"] + [predicted_position.clone()]})
+            updated_tracks.append(_track_record(
+                track, predicted_state, predicted_covariance,
+                radius=track["radius"], missed=track["missed"] + 1))
 
     for detection_index, detection in enumerate(detections):
-        if detection_index not in used_detections:
-            updated_tracks.append(
-                {"id": next_track_id, "position": detection, "velocity": torch.zeros(2), "age": 1, "missed": 0,
-                 "last_detection": detection, "history": [detection.clone()]})
+        if detection_index not in matched_detections:
+            updated_tracks.append(_new_track(detection, next_track_id))
             next_track_id += 1
 
     return updated_tracks, next_track_id
@@ -565,7 +490,8 @@ def predict_tracks(tracks, horizon):
 
     positions = torch.stack([track["position"] for track in tracks])
     velocities = torch.stack([track["velocity"] for track in tracks])
-    times = torch.arange(1, horizon + 1, dtype=positions.dtype) * DT
+    times = torch.arange(
+        1, horizon + 1, dtype=positions.dtype, device=positions.device) * DT
     return positions[None, :, :] + times[:, None, None] * velocities[None, :, :]
 
 
@@ -667,7 +593,10 @@ def select_acceleration(robot_position, robot_velocity, tracks, map_points, curr
     if tracks:
         track_predictions = predict_tracks(tracks, PLAN_HORIZON)
         track_offsets = track_predictions[None, :, :, :] - robot_predictions[:, :, None, :]
-        track_distances = torch.linalg.norm(track_offsets, dim=3) - OBSTACLE_RADIUS
+        track_radii = torch.tensor(
+            [track.get("radius", OBSTACLE_RADIUS) for track in tracks],
+            dtype=robot_predictions.dtype, device=robot_predictions.device)
+        track_distances = torch.linalg.norm(track_offsets, dim=3) - track_radii[None, None]
         track_directions = track_offsets / torch.linalg.norm(track_offsets, dim=3, keepdim=True).clamp_min(1e-6)
         track_forward_cosines = torch.sum(track_directions * goal_directions[:, :, None, :], dim=3)
         obstacle_cost += COLLISION_COST * torch.sum(directional_collision_penalty(track_distances,
@@ -701,6 +630,7 @@ def run_navigation():
     accelerations = []
     tracks = []
     track_histories = {}
+    track_radii = {}
     track_time_histories = {}
     track_frame_history = []
     velocity_histories = {}
@@ -718,11 +648,13 @@ def run_navigation():
         robot_position = robot_positions[-1]
         robot_velocity = robot_velocities[-1]
         lidar_points, lidar_hits = simulate_lidar(robot_position, time_index)
-        detections, world_points, world_clusters = scan_to_detections(robot_position, lidar_points, lidar_hits)
-        tracks, next_track_id = update_tracks(tracks, detections, next_track_id)
+        detections, world_points, world_clusters = scan_to_cluster_detections(
+            robot_position, lidar_points, lidar_hits)
+        tracks, next_track_id = update_tracks(tracks, detections, next_track_id, dt=DT)
 
         for track in tracks:
             track_histories.setdefault(track["id"], []).append(track["position"].clone())
+            track_radii[track["id"]] = float(track["radius"])
             track_time_histories.setdefault(track["id"], []).append(time_index)
             velocity_histories.setdefault(track["id"], []).append(track["velocity"].clone())
 
@@ -730,10 +662,13 @@ def run_navigation():
                 dynamic_track_ids.add(track["id"])
 
         moving_histories = [torch.stack(track_histories[track_id]) for track_id in dynamic_track_ids]
-        active_centers = torch.stack([track["position"] for track in tracks]) if tracks else torch.empty(0, 2)
-        moving_histories.append(active_centers)
+        moving_radii = [torch.full(
+            (len(track_histories[track_id]),), track_radii[track_id])
+            for track_id in dynamic_track_ids]
         dynamic_centers = torch.cat(moving_histories) if moving_histories else torch.empty(0, 2)
-        map_points = update_slam_map(map_points, world_points, dynamic_centers)
+        dynamic_radii = torch.cat(moving_radii) if moving_radii else torch.empty(0)
+        map_points = update_slam_map(
+            map_points, world_points, dynamic_centers, dynamic_radii)
 
         track_frame_history.append([{"id": track["id"], "position": track["position"].clone(), "velocity": track["velocity"].clone(), "age": track["age"], "missed": track["missed"]} for track in tracks])
         lidar_history.append((lidar_points.clone(), lidar_hits.clone()))
@@ -875,7 +810,9 @@ def draw_navigation_frame(result, time_index):
         predicted_path = torch.cat([track["position"][None], track_predictions[:, track_index]]).numpy()
         prediction_line = plt.plot(predicted_path[:, 0], predicted_path[:, 1], color=color, linestyle="-", marker=".", markersize=3, linewidth=1, alpha=0.65)[0]
         prediction_line.set_gid("prediction")
-        plt.gca().add_patch(Circle(track["position"].numpy(), OBSTACLE_RADIUS, color=color, alpha=0.12 if track["missed"] else 0.20))
+        plt.gca().add_patch(Circle(
+            track["position"].numpy(), track.get("radius", OBSTACLE_RADIUS),
+            color=color, alpha=0.12 if track["missed"] else 0.20))
 
     for cluster in result["world_cluster_history"][time_index]:
         cluster_points = cluster.numpy()

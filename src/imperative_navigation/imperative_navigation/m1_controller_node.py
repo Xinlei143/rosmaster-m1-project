@@ -89,19 +89,16 @@ class ImperativeM1Controller(Node):
             # left/right only for repeatable diagnostics.
             ("bypass_preferred_side", 0),
             ("trajectory_planner_enabled", True),
-            # Four seconds gives an M1 capped at .08 m/s enough preview to
-            # start curving at .7 m instead of braking at the box face.
-            ("trajectory_horizon", 40), ("trajectory_heading_samples", 41),
+            # Twenty 0.1 s rollout steps give a two-second preview.
+            ("trajectory_horizon", 20), ("trajectory_heading_samples", 41),
             ("trajectory_speed_samples", 4), ("dynamic_obstacle_radius", 0.20),
             ("scan_topic", "/scan"), ("odom_topic", "/odom"),
             ("command_topic", "/imperative/cmd_vel_raw"), ("odom_frame", "odom"),
             ("scan_timeout", 0.50), ("odom_timeout", 0.50),
             ("tf_max_age", 0.30),
-            # Raw laser points always remain collision obstacles.  These
-            # adapter-only settings only decide when a noisy fitted circle is
-            # trusted for moving-obstacle prediction and RViz output.
+            # Raw laser points always remain collision obstacles. These
+            # settings decide when a Kalman track is trusted for prediction.
             ("track_confirmation_age", 3),
-            ("track_position_alpha", 0.35),
             ("static_track_speed_threshold", 0.25),
             ("moving_confirmation_age", 3),
             # Zero preserves PyTorch's platform default.  The value can be
@@ -193,7 +190,6 @@ class ImperativeM1Controller(Node):
         self.planning_tracks = []
         self.track_filter = ConfirmedTrackFilter(
             self.get_parameter("track_confirmation_age").value,
-            self.get_parameter("track_position_alpha").value,
             self.get_parameter("static_track_speed_threshold").value,
             self.get_parameter("moving_confirmation_age").value)
         self.published_track_ids = set()
@@ -506,9 +502,8 @@ class ImperativeM1Controller(Node):
 
     def control_callback(self):
         now = self.get_clock().now().nanoseconds
-        # The RDK X5 takes about 0.4--0.5 s for one planner callback.  Use the
-        # elapsed callback interval in the unchanged planner equations rather
-        # than predicting at 0.1 s while a Twist is held much longer in reality.
+        # Use the elapsed callback interval in the motion and Kalman models so
+        # an occasional deadline miss does not leave prediction at stale timing.
         planner_dt = self.planner_period.next_period(time.monotonic())
         self.algorithm.DT = planner_dt
         (scan, scan_time, position, yaw, current_velocity_world,
@@ -575,32 +570,36 @@ class ImperativeM1Controller(Node):
         try:
             with torch.inference_mode():
                 stage_start = time.perf_counter()
-                detections, world_points, _ = self.algorithm.scan_to_detections(
+                detections, world_points, _ = self.algorithm.scan_to_cluster_detections(
                     position, lidar_points, lidar_hits, profile=detection_profile)
-                profile["scan_to_detections"] = time.perf_counter() - stage_start
+                profile["cluster_detection"] = time.perf_counter() - stage_start
 
                 stage_start = time.perf_counter()
                 self.tracks, self.next_track_id = self.algorithm.update_tracks(
-                    self.tracks, detections, self.next_track_id)
+                    self.tracks, detections, self.next_track_id, dt=planner_dt)
                 for track in self.tracks:
                     self.track_histories.setdefault(track["id"], []).append(track["position"].clone())
                 self.planning_tracks = self.track_filter.update(self.tracks)
                 self.dynamic_track_ids = {
                     track["id"] for track in self.planning_tracks
                     if torch.linalg.norm(track["velocity"]) > 0.0}
+                tracks_by_id = {track["id"]: track for track in self.planning_tracks}
                 dynamic_history = [torch.stack(self.track_histories[track_id])
                                    for track_id in self.dynamic_track_ids
                                    if track_id in self.track_histories]
-                active_dynamic_tracks = [track["position"] for track in self.planning_tracks
-                                         if track["id"] in self.dynamic_track_ids]
-                if active_dynamic_tracks:
-                    dynamic_history.append(torch.stack(active_dynamic_tracks))
+                dynamic_radius_history = [torch.full(
+                    (len(self.track_histories[track_id]),),
+                    float(tracks_by_id[track_id]["radius"]))
+                    for track_id in self.dynamic_track_ids
+                    if track_id in self.track_histories and track_id in tracks_by_id]
                 dynamic_centers = torch.cat(dynamic_history) if dynamic_history else torch.empty(0, 2)
+                dynamic_radii = (torch.cat(dynamic_radius_history)
+                                 if dynamic_radius_history else torch.empty(0))
                 profile["update_tracks"] = time.perf_counter() - stage_start
 
                 stage_start = time.perf_counter()
                 self.map_points = self.algorithm.update_slam_map(
-                    self.map_points, world_points, dynamic_centers)
+                    self.map_points, world_points, dynamic_centers, dynamic_radii)
                 profile["update_slam_map"] = time.perf_counter() - stage_start
 
                 if torch.linalg.norm(self.final_goal - position) <= self.algorithm.GOAL_TOLERANCE:
@@ -645,8 +644,7 @@ class ImperativeM1Controller(Node):
         except Exception as error:
             # Planning is never allowed to leave a previous velocity command
             # active, irrespective of whether this is dry-run or live mode.
-            # Keep the complete traceback in the throttled warning while this
-            # new split-search path is validated on the physical robot.  The
+            # Keep the complete traceback in the throttled warning. The
             # traceback exposes the exact file and line for any unexpected
             # planner exception without allowing a prior command to persist.
             self.warn_throttled(
@@ -665,24 +663,23 @@ class ImperativeM1Controller(Node):
             self.last_debug_time = now
             self.get_logger().info(
                 "scan_age=%.3f s odom_age=%.3f s tf_age=%.3f s planner_dt=%.3f s planner_compute_time=%.3f s; "
-                "LaserScan->points=%.3f s scan_to_detections=%.3f s update_tracks=%.3f s "
+                "LaserScan->points=%.3f s cluster_detection=%.3f s update_tracks=%.3f s "
                 "update_slam_map=%.3f s select_acceleration=%.3f s step_robot=%.3f s visualization=%.3f s; "
-                "detections[prepare=%.3f s cluster_scan=%.3f s cluster_wrap=%.3f s pending_total=%.3f s "
-                "circle_primary=%.3f s circle_split=%.3f s split_search=%.3f s finalize=%.3f s; "
-                "hits=%d clusters=%d primary_fits=%d split_fits=%d split_candidates=%d split_lstsq_fallbacks=%d]; "
+                "detections[prepare=%.3f s cluster_scan=%.3f s cluster_wrap=%.3f s "
+                "cluster_filter=%.3f s cluster_geometry=%.3f s finalize=%.3f s; "
+                "hits=%d clusters=%d detections=%d small_clusters=%d large_clusters=%d]; "
                 "pos=(%.2f, %.2f) goal=(%.2f, %.2f) hits=%d raw_tracks=%d confirmed_tracks=%d "
                 "map_points=%d nearest=%.2f cmd=(%.2f, %.2f)" % (
                     scan_age, odom_age, tf_age, planner_dt, planner_compute_time,
-                    profile["laser_scan_to_points"], profile["scan_to_detections"],
+                    profile["laser_scan_to_points"], profile["cluster_detection"],
                     profile["update_tracks"], profile["update_slam_map"],
                     profile["select_acceleration"], profile["step_robot"], profile["visualization"],
                     detection_profile["prepare"], detection_profile["cluster_scan"],
-                    detection_profile["cluster_wrap"], detection_profile["pending_clusters_total"],
-                    detection_profile["circle_fit_primary"], detection_profile["circle_fit_split"],
-                    detection_profile["split_search"], detection_profile["finalize"],
+                    detection_profile["cluster_wrap"], detection_profile["cluster_filter"],
+                    detection_profile["cluster_geometry"], detection_profile["finalize"],
                     detection_profile["hit_count"], detection_profile["initial_cluster_count"],
-                    detection_profile["primary_fit_calls"], detection_profile["split_fit_calls"],
-                    detection_profile["split_candidates"], detection_profile["split_lstsq_fallbacks"],
+                    detection_profile["detection_count"], detection_profile["small_cluster_count"],
+                    detection_profile["large_cluster_count"],
                     position[0], position[1], self.algorithm.GOAL[0], self.algorithm.GOAL[1],
                     self.scan_hit_count, len(self.tracks), len(self.planning_tracks),
                     len(self.map_points), self.nearest_range,
@@ -767,7 +764,7 @@ class ImperativeM1Controller(Node):
                 "imperative_tracks", track["id"], Marker.CYLINDER, Marker.ADD)
             marker.pose.position.x, marker.pose.position.y, marker.pose.orientation.w = (
                 float(track["position"][0]), float(track["position"][1]), 1.0)
-            marker.scale.x = marker.scale.y = 2.0 * self.algorithm.OBSTACLE_RADIUS
+            marker.scale.x = marker.scale.y = 2.0 * float(track["radius"])
             marker.scale.z, marker.color.r, marker.color.g, marker.color.a = 0.08, 1.0, 0.3, 0.8
             markers.markers.append(marker)
             centers.poses.append(marker.pose)
