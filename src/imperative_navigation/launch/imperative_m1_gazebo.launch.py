@@ -137,6 +137,7 @@ def generate_launch_description():
             "use_sim_time": True,
             "enabled": LaunchConfiguration("dynamic_obstacles"),
             "random_seed": LaunchConfiguration("dynamic_seed"),
+            "motion_mode": LaunchConfiguration("dynamic_motion_mode"),
         }],
     )
 
@@ -202,6 +203,11 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "dynamic_seed", default_value="20260814",
             description="Deterministic seed for the moving-obstacle scenario."),
+        DeclareLaunchArgument(
+            "dynamic_motion_mode", default_value="continuous",
+            description=(
+                "Obstacle motion: continuous smooth-random motion or "
+                "random_waypoint for the legacy constant-speed patrol.")),
         DeclareLaunchArgument(
             "record_performance", default_value="false",
             description="Record command and odometry motion until goal or timeout."),

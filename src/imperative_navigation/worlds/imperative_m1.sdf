@@ -132,8 +132,8 @@
     </model>
 
     <!-- Gazebo integrates these collision cylinders continuously through its
-         VelocityControl system. ROS supplies velocity commands, never moving
-         models by repeated pose teleports. -->
+         VelocityControl system. ROS supplies smooth randomized velocity
+         commands, never moving models by repeated pose teleports. -->
     <model name="moving_obstacle_1">
       <pose>2.35 2.35 0.35 0 0 0</pose>
       <link name="link">
