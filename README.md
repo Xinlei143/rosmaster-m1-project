@@ -36,6 +36,17 @@ src/yahboomcar_description/
 ├── urdf/yahboomcar_M1.urdf.xacro          # Yahboom 原厂 M1 描述
 ├── urdf/yahboomcar_M1_gazebo.urdf.xacro   # Gazebo 底盘/雷达扩展
 └── meshes/M1Mecanum/                      # M1 外观网格
+
+src/m1_nav2_bringup/
+├── launch/
+│   ├── nav2_m1_mapping.launch.py          # Gazebo + slam_toolbox 建图
+│   ├── nav2_m1_gazebo.launch.py           # 地图 + AMCL + Nav2 仿真导航
+│   └── nav2_m1_real.launch.py             # 真实 M1 + 地图 + AMCL + Nav2
+├── config/
+│   ├── nav2_params.yaml                    # M1 全向 DWB/costmap/安全链
+│   └── slam_toolbox.yaml                   # 二维同步建图参数
+├── maps/m1_baseline.{yaml,pgm}             # 静态 Gazebo baseline 地图
+└── rviz/                                   # Nav2 建图/导航 RViz 配置
 ```
 
 ## 2. 算法概览
@@ -89,7 +100,7 @@ source /opt/ros/humble/setup.bash
 export PYTHONPATH=/usr/lib/python3/dist-packages${PYTHONPATH:+:$PYTHONPATH}
 
 /usr/bin/colcon build \
-  --packages-select yahboomcar_description imperative_navigation \
+  --packages-select yahboomcar_description imperative_navigation m1_nav2_bringup \
   --symlink-install
 ```
 
@@ -104,6 +115,8 @@ source /home/xinlei/Data/ROS/rosmaster-m1-project/install/setup.bash
 ```bash
 ros2 pkg prefix imperative_navigation
 ros2 pkg executables imperative_navigation
+ros2 pkg prefix m1_nav2_bringup
+ros2 pkg executables m1_nav2_bringup
 ```
 
 ### 3.3 运行时加载 Torch
@@ -183,7 +196,103 @@ ros2 launch imperative_navigation imperative_m1_gazebo.launch.py \
 
 软件 LiDAR 只用于仿真兼容，不代表实机使用仿真障碍物真值；实机模式不会启动或使用它。
 
-### 4.3 Gazebo 暂停检查
+### 4.3 Nav2 建图模式
+
+Nav2 建图复用同一个 Gazebo 世界，但默认关闭动态障碍物。正式保存静态 baseline 地图时不要打开
+`dynamic_obstacles`，否则移动圆柱可能留下拖影或鬼影：
+
+```bash
+source /opt/ros/humble/setup.bash
+source /home/xinlei/Data/ROS/rosmaster-m1-project/install/setup.bash
+
+ros2 launch m1_nav2_bringup nav2_m1_mapping.launch.py \
+  gui:=true rviz:=true dynamic_obstacles:=false
+```
+
+启动后用 `teleop_twist_keyboard` 手动控制 M1 扫过房间；SLAM 不会自动探索：
+
+```bash
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
+```
+
+确认 `/cmd_vel` 只有当前 teleop 发布者后，在另一个终端保存地图：
+
+```bash
+ros2 run nav2_map_server map_saver_cli -f /tmp/m1_mapping
+```
+
+保存的 `m1_mapping.yaml` 和 `m1_mapping.pgm` 可以替换 `m1_nav2_bringup/maps/` 中的 baseline 文件，
+替换后重新执行一次 `colcon build --packages-select m1_nav2_bringup --symlink-install`，并把 YAML 的
+`origin` 与自动初始位姿一起核对。仓库内的 `m1_baseline` 是按当前静态世界几何生成的确定性 baseline，
+可直接导航，也可用上述 SLAM 结果替换。建图模式不启动 imperative controller，也不启动 watchdog；
+teleop 只用于 Gazebo 手动测绘。
+
+### 4.4 Nav2 导航模式
+
+导航模式默认加载 `maps/m1_baseline.yaml`，自动向 AMCL 发布 Gazebo spawn 对应的初始位姿
+`(-2.5, -1.5, 0.0)`，同时仍可在 RViz 使用 `2D Pose Estimate` 手动重定位：
+
+```bash
+source /opt/ros/humble/setup.bash
+source /home/xinlei/Data/ROS/rosmaster-m1-project/install/setup.bash
+
+ros2 launch m1_nav2_bringup nav2_m1_gazebo.launch.py \
+  gui:=true rviz:=true dynamic_obstacles:=true
+```
+
+需要覆盖初始位姿时：
+
+```bash
+ros2 launch m1_nav2_bringup nav2_m1_gazebo.launch.py \
+  initial_pose_x:=-2.5 initial_pose_y:=-1.5 initial_pose_yaw:=0.0
+```
+
+Nav2 模式的固定速度链为：
+
+```text
+controller_server → /cmd_vel_nav
+    → velocity_smoother → /cmd_vel_smoothed
+    → collision_monitor → /imperative/cmd_vel_raw
+    → imperative_cmd_watchdog → /cmd_vel
+    → Gazebo MecanumDrive
+```
+
+`/cmd_vel` 只允许 watchdog 发布。DWB 和 Velocity Smoother 都保留 `linear.y` 的全向速度范围；
+Collision Monitor 使用 `/scan` 的 slowdown/stop 区域，watchdog 使用 `0.50 s` 超时和 `20 Hz` 输出，
+上游中断后最迟约 `0.55 s` 开始持续输出零速度。
+
+软件 LiDAR 模式会把 `/sim_scan` 通过 `m1_nav2_bringup/scan_relay` 转到 Nav2 固定输入 `/scan`：
+
+```bash
+ros2 launch m1_nav2_bringup nav2_m1_gazebo.launch.py \
+  software_lidar:=true dynamic_obstacles:=false
+```
+
+### 4.5 Nav2 实机模式
+
+实机 launch 不启动 Gazebo、软件 LiDAR 或旧 imperative controller；它假设厂家底盘已经提供
+`/scan`、`/odom` 和 `odom → base_footprint`，并将 Nav2 的最终命令固定交给现有 watchdog。
+默认启动 `robot_state_publisher` 加载 `yahboomcar_M1.urdf.xacro`，发布 `base_footprint → base_link`
+和传感器固定 TF。如果厂家节点已经发布相同的 `robot_description` TF，可设置
+`publish_robot_description:=false` 避免重复发布。
+
+真实机器人不能使用仓库中的 Gazebo baseline 地图作为实际环境地图；请先传入实机保存的地图：
+
+```bash
+source /opt/ros/humble/setup.bash
+source /home/xinlei/Data/ROS/rosmaster-m1-project/install/setup.bash
+
+ros2 launch m1_nav2_bringup nav2_m1_real.launch.py \
+  map:=/absolute/path/to/m1_real.yaml rviz:=true
+```
+
+实机默认不自动发布初始位姿，且 AMCL 不会采用仿真用的 YAML 初始坐标。启动后在 RViz 使用
+`2D Pose Estimate`；只有当机器人确实位于已知地图坐标时，才使用
+`publish_initial_pose:=true initial_pose_x:=... initial_pose_y:=...`，或显式打开
+`set_initial_pose:=true` 使用参数文件中的初始位姿。
+第一次上电建议保持底盘不使能，确认 `/cmd_vel` 只有 watchdog 发布者，再按低速验收流程逐步使能。
+
+### 4.6 Gazebo 暂停检查
 
 控制器使用仿真时间。如果 Gazebo 暂停，`/clock` 不推进，ROS 2 定时器也不会正常执行，小车会表现为完全不动。
 
@@ -194,7 +303,7 @@ ros2 topic hz /clock
 
 如果没有消息，请点击 Gazebo 窗口的播放按钮，确保仿真没有暂停。
 
-### 4.4 M1 模型和雷达文件位置
+### 4.7 M1 模型和雷达文件位置
 
 本项目使用以下文件接入 Yahboom M1 模型，同时保留原来的 `imperative_m1.sdf` 世界和算法入口：
 
@@ -229,12 +338,23 @@ Gazebo gpu_lidar            → /scan
 software_lidar             → /sim_scan → imperative_controller
 ```
 
+Nav2 模式下旧控制器不会启动，速度链改为：
+
+```text
+controller_server → /cmd_vel_nav
+velocity_smoother → /cmd_vel_smoothed
+collision_monitor → /imperative/cmd_vel_raw
+imperative_cmd_watchdog → /cmd_vel → Gazebo MecanumDrive
+```
+
 ### 5.2 主要话题
 
 | 话题 | 类型 | 作用 |
 | --- | --- | --- |
 | `/cmd_vel` | `geometry_msgs/msg/Twist` | Gazebo 或底盘最终速度输入 |
-| `/imperative/cmd_vel_raw` | `geometry_msgs/msg/Twist` | 实机规划器的原始速度输出 |
+| `/cmd_vel_nav` | `geometry_msgs/msg/Twist` | Nav2 DWB 输出 |
+| `/cmd_vel_smoothed` | `geometry_msgs/msg/Twist` | Velocity Smoother 输出 |
+| `/imperative/cmd_vel_raw` | `geometry_msgs/msg/Twist` | Collision Monitor 安全过滤后的原始速度 |
 | `/scan` | `sensor_msgs/msg/LaserScan` | Gazebo bridge 或实机 LiDAR 扫描 |
 | `/sim_scan` | `sensor_msgs/msg/LaserScan` | Gazebo 软件 LiDAR 扫描 |
 | `/odom` | `nav_msgs/msg/Odometry` | 机器人位置、姿态和速度 |

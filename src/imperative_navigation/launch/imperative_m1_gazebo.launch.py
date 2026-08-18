@@ -103,6 +103,7 @@ def generate_launch_description():
         package="imperative_navigation",
         executable="imperative_controller",
         name="imperative_controller",
+        condition=IfCondition(LaunchConfiguration("start_imperative_controller")),
         output="screen",
         parameters=[{
             "use_sim_time": True,
@@ -193,6 +194,11 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("rviz", default_value="true", description="Open RViz."),
         DeclareLaunchArgument("gui", default_value="true", description="Open the Gazebo GUI."),
+        DeclareLaunchArgument(
+            "start_imperative_controller", default_value="true",
+            description=(
+                "Start the legacy imperative controller. Set false when an "
+                "external navigation stack, such as Nav2, owns cmd_vel.")),
         DeclareLaunchArgument(
             "software_lidar", default_value="false",
             description=(
