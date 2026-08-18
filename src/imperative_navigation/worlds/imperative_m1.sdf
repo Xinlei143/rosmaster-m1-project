@@ -101,9 +101,10 @@
         </visual>
       </link>
     </model>
-    <!-- Yellow obstacle on the initial direct route. -->
+    <!-- Keep the M1 spawn clear; this obstacle tests MPPI detouring in the
+         middle of the standard start-to-goal route. -->
     <model name="static_obstacle_2">
-      <pose>-2.05 -1.18 0.3 0 0 0</pose>
+      <pose>0.0 0.0 0.3 0 0 0</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">

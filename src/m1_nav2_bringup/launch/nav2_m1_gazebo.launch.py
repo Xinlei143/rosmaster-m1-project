@@ -61,8 +61,6 @@ def generate_launch_description():
                     "rviz": "false",
                     "software_lidar": LaunchConfiguration("software_lidar"),
                     "dynamic_obstacles": LaunchConfiguration("dynamic_obstacles"),
-                    "record_performance": LaunchConfiguration("record_performance"),
-                    "start_imperative_controller": "false",
                 }.items(),
             ),
         ],
@@ -115,14 +113,6 @@ def generate_launch_description():
             ("/tf_static", "tf_static"),
             ("cmd_vel", "/cmd_vel_nav"),
         ],
-    )
-    smoother_server = Node(
-        package="nav2_smoother",
-        executable="smoother_server",
-        name="smoother_server",
-        output="screen",
-        parameters=[configured_params],
-        remappings=[("/tf", "tf"), ("/tf_static", "tf_static")],
     )
     planner_server = Node(
         package="nav2_planner",
@@ -178,9 +168,8 @@ def generate_launch_description():
             "use_sim_time": use_sim_time,
             "autostart": autostart,
             "node_names": [
-                "controller_server", "smoother_server", "planner_server",
-                "behavior_server", "bt_navigator", "waypoint_follower",
-                "velocity_smoother", "collision_monitor",
+                "controller_server", "planner_server", "behavior_server",
+                "bt_navigator", "waypoint_follower",
             ],
         }],
     )
@@ -191,6 +180,17 @@ def generate_launch_description():
         name="collision_monitor",
         output="screen",
         parameters=[configured_params],
+    )
+    safety_lifecycle = Node(
+        package="nav2_lifecycle_manager",
+        executable="lifecycle_manager",
+        name="lifecycle_manager_safety",
+        output="screen",
+        parameters=[{
+            "use_sim_time": use_sim_time,
+            "autostart": autostart,
+            "node_names": ["velocity_smoother", "collision_monitor"],
+        }],
     )
     watchdog = Node(
         package="imperative_navigation",
@@ -231,11 +231,12 @@ def generate_launch_description():
     arguments = [
         DeclareLaunchArgument("gui", default_value="true"),
         DeclareLaunchArgument("rviz", default_value="true"),
-        DeclareLaunchArgument("software_lidar", default_value="false"),
+        DeclareLaunchArgument(
+            "software_lidar", default_value="true",
+            description="Use deterministic software LaserScan for Gazebo Sim 6 / WSLg."),
         DeclareLaunchArgument(
             "dynamic_obstacles", default_value="true",
             description="Enable moving obstacles for navigation tests."),
-        DeclareLaunchArgument("record_performance", default_value="false"),
         DeclareLaunchArgument("use_sim_time", default_value="true"),
         DeclareLaunchArgument("autostart", default_value="true"),
         DeclareLaunchArgument("namespace", default_value=""),
@@ -253,15 +254,17 @@ def generate_launch_description():
         amcl,
         localization_lifecycle,
         controller_server,
-        smoother_server,
         planner_server,
         behavior_server,
         bt_navigator,
         waypoint_follower,
         velocity_smoother,
-        navigation_lifecycle,
+        # Gazebo needs time to spawn M1 and start /odom plus odom->base TF.
+        # Starting controller_server earlier leaves the local controller inactive.
+        TimerAction(period=20.0, actions=[navigation_lifecycle]),
         collision_monitor,
+        TimerAction(period=24.0, actions=[safety_lifecycle]),
         watchdog,
-        TimerAction(period=6.0, actions=[initial_pose]),
+        TimerAction(period=22.0, actions=[initial_pose]),
         rviz,
     ])

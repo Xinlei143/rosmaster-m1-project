@@ -1,6 +1,11 @@
-  cd ~/car_ws2/rosmaster-m1-project
-  source /opt/ros/humble/setup.bash
-  source install/setup.bash
+# MPPI 启动
 
-  PYTHONPATH="/home/lin24311/car_ws/.venv-ros2-ml/lib/python3.10/site-packages:$PYTHONPATH" \
-  ros2 launch imperative_navigation imperative_m1_gazebo.launch.py
+```bash
+cd /home/lin24311/car_ws2/rosmaster-m1-project
+source /opt/ros/humble/setup.bash
+colcon build --packages-select yahboomcar_description imperative_navigation m1_nav2_bringup --symlink-install
+source install/setup.bash
+ros2 launch m1_nav2_bringup nav2_m1_gazebo.launch.py gui:=true rviz:=true dynamic_obstacles:=true
+```
+
+在 RViz 选择 **2D Goal Pose** 设置导航目标。不要启动 `imperative_navigation` 的旧控制器：该包现在只提供 Gazebo 适配、软件激光雷达、动态障碍物场景与最终速度 watchdog。

@@ -2,7 +2,7 @@
 <package format="3">
   <name>imperative_navigation</name>
   <version>0.1.0</version>
-  <description>ROS 2 adapters for the imperative moving-obstacle planner in Gazebo Sim and on Rosmaster M1.</description>
+  <description>Gazebo Sim adapters and command watchdog for Nav2 MPPI on Rosmaster M1.</description>
   <maintainer email="user@example.com">Rosmaster user</maintainer>
   <license>Apache-2.0</license>
 
@@ -15,8 +15,6 @@
   <depend>ros_gz_sim</depend>
   <depend>sensor_msgs</depend>
   <depend>tf2_ros</depend>
-  <depend>visualization_msgs</depend>
-  <exec_depend>rviz2</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>xacro</exec_depend>
   <exec_depend>yahboomcar_description</exec_depend>

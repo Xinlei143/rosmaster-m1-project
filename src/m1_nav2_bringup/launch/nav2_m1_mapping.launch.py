@@ -42,8 +42,6 @@ def generate_launch_description():
             "rviz": "false",
             "software_lidar": LaunchConfiguration("software_lidar"),
             "dynamic_obstacles": LaunchConfiguration("dynamic_obstacles"),
-            "record_performance": "false",
-            "start_imperative_controller": "false",
         }.items(),
     )
     slam = IncludeLaunchDescription(

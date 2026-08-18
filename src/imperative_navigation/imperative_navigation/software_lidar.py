@@ -26,15 +26,23 @@ class SoftwareLidar(Node):
     OBSTACLE_RADIUS = 0.30
     X_MIN, X_MAX = -4.0, 4.0
     Y_MIN, Y_MAX = -3.2, 3.2
-    STATIC_CENTERS = [(-2.05, -1.18), (-3.0, 2.2)]
+    # Must match the static cylinders in imperative_m1.sdf and the baseline
+    # map. The spawn at (-2.5, -1.5) is intentionally unobstructed.
+    STATIC_CENTERS = [(0.0, 0.0), (-3.0, 2.2)]
 
     def __init__(self):
         super().__init__("software_lidar")
         self.declare_parameter("dynamic_obstacles_topic", "/imperative/dynamic_obstacles")
         self.declare_parameter("scan_topic", "/sim_scan")
+        # Dynamic centers originate from Gazebo pose feedback.  They must not
+        # be retained forever: a stalled bridge must clear the simulated scan,
+        # otherwise Collision Monitor keeps stopping for an obstacle at its
+        # last known position after it has visibly moved away.
+        self.declare_parameter("dynamic_obstacle_timeout", 0.50)
         self.position = None
         self.yaw = 0.0
         self.dynamic_centers = []
+        self.last_dynamic_update_ns = None
         sensor_qos = QoSProfile(depth=5, reliability=ReliabilityPolicy.BEST_EFFORT)
         self.create_subscription(Odometry, "/odom", self.odom_callback, 10)
         self.create_subscription(
@@ -61,6 +69,7 @@ class SoftwareLidar(Node):
 
     def dynamic_callback(self, message):
         self.dynamic_centers = [(pose.position.x, pose.position.y) for pose in message.poses]
+        self.last_dynamic_update_ns = self.get_clock().now().nanoseconds
 
     def ray_circle_distance(self, direction, center):
         offset_x = center[0] - self.position[0]
@@ -102,7 +111,15 @@ class SoftwareLidar(Node):
         scan.scan_time = 1.0 / 12.0
         scan.range_min = self.RANGE_MIN
         scan.range_max = self.RANGE_MAX
-        centers = self.STATIC_CENTERS + self.dynamic_centers
+        dynamic_timeout_ns = int(
+            float(self.get_parameter("dynamic_obstacle_timeout").value) * 1e9)
+        dynamic_is_fresh = (
+            self.last_dynamic_update_ns is not None
+            and self.get_clock().now().nanoseconds - self.last_dynamic_update_ns
+            <= dynamic_timeout_ns
+        )
+        centers = self.STATIC_CENTERS + (
+            self.dynamic_centers if dynamic_is_fresh else [])
         ranges = []
         for index in range(self.sample_count):
             heading = self.yaw + self.angle_min + index * self.angle_increment

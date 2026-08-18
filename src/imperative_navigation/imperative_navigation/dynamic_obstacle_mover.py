@@ -61,7 +61,8 @@ class DynamicObstacleMover(Node):
                 "acceleration": 0.55,
             },
         ]
-        self.static_centers = [(-2.05, -1.18), (-3.0, 2.2)]
+        # Keep this aligned with imperative_m1.sdf and software_lidar.py.
+        self.static_centers = [(0.0, 0.0), (-3.0, 2.2)]
         if self.motion_mode == "random_waypoint":
             for index, obstacle in enumerate(self.obstacles):
                 obstacle["target"] = self.sample_approach_target(obstacle["position"], index)

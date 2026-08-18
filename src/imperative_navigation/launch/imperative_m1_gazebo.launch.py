@@ -1,4 +1,4 @@
-"""Launch the M1 Gazebo Sim scene, ROS bridges, planner, and RViz."""
+"""Launch M1 Gazebo Sim resources used by the Nav2 MPPI bringup."""
 
 import os
 
@@ -8,13 +8,10 @@ from launch.actions import (
     DeclareLaunchArgument,
     IncludeLaunchDescription,
     OpaqueFunction,
-    RegisterEventHandler,
     SetEnvironmentVariable,
-    Shutdown,
     TimerAction,
 )
 from launch.conditions import IfCondition
-from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
@@ -42,16 +39,16 @@ def generate_launch_description():
     description_resource_root = os.path.dirname(description_share)
     model_file = os.path.join(
         description_share, "urdf", "yahboomcar_M1_gazebo.urdf.xacro")
-    robot_description = ParameterValue(
-        Command([
-            FindExecutable(name="xacro"), " ", model_file,
-            " enable_gpu_lidar:=",
-            PythonExpression([
-                "'false' if '", LaunchConfiguration("software_lidar"),
-                "' == 'true' else 'true'"]),
-        ]),
-        value_type=str,
-    )
+    # Feed Gazebo the expanded XML directly. This avoids the unreliable
+    # transient-local /robot_description topic handshake in ros_gz_sim 0.244.
+    robot_description_xml = Command([
+        FindExecutable(name="xacro"), " ", model_file,
+        " enable_gpu_lidar:=",
+        PythonExpression([
+            "'false' if '", LaunchConfiguration("software_lidar"),
+            "' == 'true' else 'true'"]),
+    ])
+    robot_description = ParameterValue(robot_description_xml, value_type=str)
 
     robot_state_publisher = Node(
         package="robot_state_publisher",
@@ -70,7 +67,7 @@ def generate_launch_description():
         name="spawn_m1",
         output="screen",
         arguments=[
-            "-topic", "/robot_description",
+            "-string", robot_description_xml,
             "-name", "m1",
             "-x", "-2.5",
             "-y", "-1.5",
@@ -99,37 +96,6 @@ def generate_launch_description():
         output="screen",
     )
 
-    controller = Node(
-        package="imperative_navigation",
-        executable="imperative_controller",
-        name="imperative_controller",
-        condition=IfCondition(LaunchConfiguration("start_imperative_controller")),
-        output="screen",
-        parameters=[{
-            "use_sim_time": True,
-            "command_topic": "/cmd_vel",
-            "scan_topic": PythonExpression(["'/sim_scan' if '", LaunchConfiguration("software_lidar"), "' == 'true' else '/scan'"]),
-            "odom_topic": "/odom",
-            "goal_x": 2.5,
-            "goal_y": 1.5,
-            "control_period": LaunchConfiguration("control_period"),
-            "max_speed": LaunchConfiguration("max_speed"),
-            "max_acceleration": LaunchConfiguration("max_acceleration"),
-            "robot_radius": LaunchConfiguration("robot_radius"),
-            "safety_margin": LaunchConfiguration("safety_margin"),
-            "trajectory_planner_enabled": LaunchConfiguration("trajectory_planner_enabled"),
-            "trajectory_horizon": LaunchConfiguration("trajectory_horizon"),
-            "trajectory_heading_samples": LaunchConfiguration("trajectory_heading_samples"),
-            "trajectory_speed_samples": LaunchConfiguration("trajectory_speed_samples"),
-            "dynamic_obstacle_radius": LaunchConfiguration("dynamic_obstacle_radius"),
-            "moving_confirmation_age": LaunchConfiguration("moving_confirmation_age"),
-            # Matches the static cylinders in imperative_m1.sdf.  This is used
-            # only when the WSLg/OGRE GPU-LiDAR bug saturates every beam.
-            "static_obstacles": [-2.05, -1.18, 0.3, -3.0, 2.2, 0.3],
-            "require_dynamic_obstacles": LaunchConfiguration("dynamic_obstacles"),
-        }],
-    )
-
     dynamic_obstacle_mover = Node(
         package="imperative_navigation",
         executable="dynamic_obstacle_mover",
@@ -152,35 +118,6 @@ def generate_launch_description():
         parameters=[{"use_sim_time": True}],
     )
 
-    rviz = Node(
-        package="rviz2",
-        executable="rviz2",
-        arguments=["-d", os.path.join(package_share, "rviz", "imperative.rviz")],
-        condition=IfCondition(LaunchConfiguration("rviz")),
-        output="screen",
-    )
-
-    performance_recorder = Node(
-        package="imperative_navigation",
-        executable="avoidance_performance_recorder",
-        name="avoidance_performance_recorder",
-        condition=IfCondition(LaunchConfiguration("record_performance")),
-        output="screen",
-        parameters=[{
-            "use_sim_time": True,
-            "scenario": PythonExpression([
-                "'dynamic' if '", LaunchConfiguration("dynamic_obstacles"),
-                "' == 'true' else 'static'",
-            ]),
-            "output_dir": LaunchConfiguration("performance_output_dir"),
-            "timeout": LaunchConfiguration("performance_timeout"),
-            "goal_x": 2.5,
-            "goal_y": 1.5,
-            "robot_radius": LaunchConfiguration("robot_radius"),
-            "safety_margin": LaunchConfiguration("safety_margin"),
-        }],
-    )
-
     # Gazebo Sim resolves package:// mesh URIs as model:// package paths.  The
     # parent of the ament share directory is therefore part of its resource
     # search path so the copied M1 STL meshes can be loaded after spawning.
@@ -192,13 +129,8 @@ def generate_launch_description():
                os.environ.get("GZ_SIM_RESOURCE_PATH", "")]))
 
     return LaunchDescription([
-        DeclareLaunchArgument("rviz", default_value="true", description="Open RViz."),
+        DeclareLaunchArgument("rviz", default_value="false", description="Unused adapter compatibility argument."),
         DeclareLaunchArgument("gui", default_value="true", description="Open the Gazebo GUI."),
-        DeclareLaunchArgument(
-            "start_imperative_controller", default_value="true",
-            description=(
-                "Start the legacy imperative controller. Set false when an "
-                "external navigation stack, such as Nav2, owns cmd_vel.")),
         DeclareLaunchArgument(
             "software_lidar", default_value="false",
             description=(
@@ -214,37 +146,7 @@ def generate_launch_description():
             "dynamic_motion_mode", default_value="continuous",
             description=(
                 "Obstacle motion: continuous smooth-random motion or "
-                "random_waypoint for the legacy constant-speed patrol.")),
-        DeclareLaunchArgument(
-            "record_performance", default_value="false",
-            description="Record command and odometry motion until goal or timeout."),
-        DeclareLaunchArgument(
-            "performance_output_dir", default_value="/tmp/imperative_m1_performance",
-            description="Empty/new directory for benchmark CSV and summary files."),
-        DeclareLaunchArgument(
-            "performance_timeout", default_value="60.0",
-            description="Benchmark duration measured in simulation seconds."),
-        DeclareLaunchArgument("control_period", default_value="0.1",
-                              description="Controller period [s]."),
-        DeclareLaunchArgument("max_speed", default_value="0.8", description="Planner speed cap [m/s]."),
-        DeclareLaunchArgument("max_acceleration", default_value="1.0",
-                              description="Planner acceleration cap [m/s^2]."),
-        DeclareLaunchArgument("robot_radius", default_value="0.15",
-                              description="Robot radius used by the planner [m]."),
-        DeclareLaunchArgument("safety_margin", default_value="0.15",
-                              description="Additional planner clearance [m]."),
-        DeclareLaunchArgument("trajectory_planner_enabled", default_value="true",
-                              description="Use continuous receding-horizon holonomic trajectory planning."),
-        DeclareLaunchArgument("trajectory_horizon", default_value="20",
-                              description="Trajectory rollout length [steps]; 20 steps = 2 s at 0.1 s control period."),
-        DeclareLaunchArgument("trajectory_heading_samples", default_value="41",
-                              description="Number of sampled velocity headings per rollout."),
-        DeclareLaunchArgument("trajectory_speed_samples", default_value="4",
-                              description="Number of sampled speeds per rollout."),
-        DeclareLaunchArgument("dynamic_obstacle_radius", default_value="0.20",
-                              description="Radius assigned to each predicted moving-object track [m]."),
-        DeclareLaunchArgument("moving_confirmation_age", default_value="3",
-                              description="Consecutive moving observations required before dynamic prediction."),
+                "random_waypoint for waypoint patrol.")),
         SetEnvironmentVariable("IGN_GAZEBO_RESOURCE_PATH", ignition_resource_path),
         SetEnvironmentVariable("GZ_SIM_RESOURCE_PATH", gz_resource_path),
         OpaqueFunction(function=launch_gazebo),
@@ -253,11 +155,4 @@ def generate_launch_description():
         bridge,
         dynamic_obstacle_mover,
         software_lidar,
-        controller,
-        performance_recorder,
-        rviz,
-        RegisterEventHandler(OnProcessExit(
-            target_action=performance_recorder,
-            on_exit=[Shutdown(reason="avoidance benchmark finished")],
-        )),
     ])
