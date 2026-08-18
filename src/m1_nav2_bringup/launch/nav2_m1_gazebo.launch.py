@@ -5,7 +5,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
-    DeclareLaunchArgument, IncludeLaunchDescription, TimerAction)
+    DeclareLaunchArgument, GroupAction, IncludeLaunchDescription, TimerAction)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -49,16 +49,23 @@ def generate_launch_description():
         allow_substs=True,
     )
 
-    gazebo = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(gazebo_launch),
-        launch_arguments={
-            "gui": LaunchConfiguration("gui"),
-            "rviz": "false",
-            "software_lidar": LaunchConfiguration("software_lidar"),
-            "dynamic_obstacles": LaunchConfiguration("dynamic_obstacles"),
-            "record_performance": LaunchConfiguration("record_performance"),
-            "start_imperative_controller": "false",
-        }.items(),
+    # Keep the legacy Gazebo launch's arguments local.  In particular, its
+    # rviz=false must not disable Nav2's RViz node below.
+    gazebo = GroupAction(
+        scoped=True,
+        actions=[
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(gazebo_launch),
+                launch_arguments={
+                    "gui": LaunchConfiguration("gui"),
+                    "rviz": "false",
+                    "software_lidar": LaunchConfiguration("software_lidar"),
+                    "dynamic_obstacles": LaunchConfiguration("dynamic_obstacles"),
+                    "record_performance": LaunchConfiguration("record_performance"),
+                    "start_imperative_controller": "false",
+                }.items(),
+            ),
+        ],
     )
 
     scan_relay = Node(
