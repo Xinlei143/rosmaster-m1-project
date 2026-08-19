@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>imperative_navigation</name>
+  <name>m1_nav2_support</name>
   <version>0.1.0</version>
   <description>Gazebo Sim adapters and command watchdog for Nav2 MPPI on Rosmaster M1.</description>
   <maintainer email="user@example.com">Rosmaster user</maintainer>

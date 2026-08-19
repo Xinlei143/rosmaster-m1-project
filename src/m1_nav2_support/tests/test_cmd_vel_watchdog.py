@@ -7,7 +7,7 @@ import rclpy
 from geometry_msgs.msg import Twist
 
 
-NODE_PATH = Path(__file__).parents[1] / "imperative_navigation" / "cmd_vel_watchdog_node.py"
+NODE_PATH = Path(__file__).parents[1] / "m1_nav2_support" / "cmd_vel_watchdog_node.py"
 SPEC = importlib.util.spec_from_file_location("cmd_vel_watchdog", NODE_PATH)
 WATCHDOG = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(WATCHDOG)
@@ -65,7 +65,7 @@ def test_zero_raw_command_is_forwarded_as_zero_while_fresh():
 def test_watchdog_node_starts_without_a_controller_node():
     """No raw publisher is needed for the watchdog node and timer to exist."""
     rclpy.init()
-    node = WATCHDOG.ImperativeCmdWatchdog()
+    node = WATCHDOG.M1CmdWatchdog()
     try:
         assert node.state.is_stale(0)
         # Explicitly run one timer cycle with no controller/raw publisher.

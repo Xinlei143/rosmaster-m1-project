@@ -19,22 +19,20 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def launch_gazebo(context):
-    package_share = get_package_share_directory("imperative_navigation")
+    package_share = get_package_share_directory("m1_nav2_support")
     ros_gz_sim_share = get_package_share_directory("ros_gz_sim")
-    world = os.path.join(package_share, "worlds", "imperative_m1.sdf")
+    world = os.path.join(package_share, "worlds", "m1.sdf")
     server_only = "-s " if LaunchConfiguration("gui").perform(context).lower() == "false" else ""
 
     return [IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(ros_gz_sim_share, "launch", "gz_sim.launch.py")),
-        # OGRE is the stable renderer for this Gazebo 6 + WSLg installation.
-        # See the controller's static_obstacles fallback for its GPU-LiDAR
-        # compatibility behavior on this renderer.
-        launch_arguments={"gz_args": f"{server_only}-r -v 4 --render-engine ogre {world}"}.items(),
+        # OGRE2 is required for the GPU LiDAR's full 360-degree field of view.
+        launch_arguments={"gz_args": f"{server_only}-r -v 4 --render-engine ogre2 {world}"}.items(),
     )]
 
 
 def generate_launch_description():
-    package_share = get_package_share_directory("imperative_navigation")
+    package_share = get_package_share_directory("m1_nav2_support")
     description_share = get_package_share_directory("yahboomcar_description")
     description_resource_root = os.path.dirname(description_share)
     model_file = os.path.join(
@@ -87,17 +85,17 @@ def generate_launch_description():
             "/model/moving_obstacle_1/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
             "/model/moving_obstacle_2/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
             "/model/moving_obstacle_3/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
-            "/world/imperative_m1/dynamic_pose/info@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V",
-            "/world/imperative_m1/set_pose@ros_gz_interfaces/srv/SetEntityPose",
+            "/world/m1/dynamic_pose/info@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V",
+            "/world/m1/set_pose@ros_gz_interfaces/srv/SetEntityPose",
         ],
         remappings=[
-            ("/world/imperative_m1/dynamic_pose/info", "/imperative/gazebo_dynamic_tf"),
+            ("/world/m1/dynamic_pose/info", "/m1/gazebo_dynamic_tf"),
         ],
         output="screen",
     )
 
     dynamic_obstacle_mover = Node(
-        package="imperative_navigation",
+        package="m1_nav2_support",
         executable="dynamic_obstacle_mover",
         name="dynamic_obstacle_mover",
         output="screen",
@@ -110,7 +108,7 @@ def generate_launch_description():
     )
 
     software_lidar = Node(
-        package="imperative_navigation",
+        package="m1_nav2_support",
         executable="software_lidar",
         name="software_lidar",
         condition=IfCondition(LaunchConfiguration("software_lidar")),

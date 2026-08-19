@@ -21,7 +21,7 @@ sudo apt install ros-humble-navigation2 ros-humble-nav2-bringup \
   ros-humble-nav2-mppi-controller ros-humble-ros-gz-sim
 
 colcon build --packages-select \
-  yahboomcar_description imperative_navigation m1_nav2_bringup \
+  yahboomcar_description m1_nav2_support m1_nav2_bringup \
   --symlink-install
 source install/setup.bash
 ```

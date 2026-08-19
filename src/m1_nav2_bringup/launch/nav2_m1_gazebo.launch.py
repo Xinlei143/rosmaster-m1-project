@@ -16,9 +16,9 @@ from nav2_common.launch import RewrittenYaml
 
 def generate_launch_description():
     bringup_share = get_package_share_directory("m1_nav2_bringup")
-    imperative_share = get_package_share_directory("imperative_navigation")
+    support_share = get_package_share_directory("m1_nav2_support")
     gazebo_launch = os.path.join(
-        imperative_share, "launch", "imperative_m1_gazebo.launch.py")
+        support_share, "launch", "m1_gazebo.launch.py")
     params_file = os.path.join(bringup_share, "config", "nav2_params.yaml")
     default_map = os.path.join(bringup_share, "maps", "m1_baseline.yaml")
 
@@ -193,30 +193,16 @@ def generate_launch_description():
         }],
     )
     watchdog = Node(
-        package="imperative_navigation",
-        executable="imperative_cmd_watchdog",
-        name="imperative_cmd_watchdog",
+        package="m1_nav2_support",
+        executable="m1_cmd_watchdog",
+        name="m1_cmd_watchdog",
         output="screen",
         parameters=[{
             "use_sim_time": use_sim_time,
-            "input_topic": "/imperative/cmd_vel_raw",
+            "input_topic": "/m1/cmd_vel_raw",
             "output_topic": "/cmd_vel",
             "watchdog_timeout": 0.50,
             "publish_rate": 20.0,
-        }],
-    )
-    initial_pose = Node(
-        package="m1_nav2_bringup",
-        executable="initial_pose_publisher",
-        name="m1_initial_pose_publisher",
-        output="screen",
-        parameters=[{
-            "use_sim_time": use_sim_time,
-            "x": LaunchConfiguration("initial_pose_x"),
-            "y": LaunchConfiguration("initial_pose_y"),
-            "yaw": LaunchConfiguration("initial_pose_yaw"),
-            "publish_rate": 1.0,
-            "publish_count": 3,
         }],
     )
     rviz = Node(
@@ -242,9 +228,6 @@ def generate_launch_description():
         DeclareLaunchArgument("namespace", default_value=""),
         DeclareLaunchArgument("params_file", default_value=params_file),
         DeclareLaunchArgument("map", default_value=default_map),
-        DeclareLaunchArgument("initial_pose_x", default_value="-2.5"),
-        DeclareLaunchArgument("initial_pose_y", default_value="-1.5"),
-        DeclareLaunchArgument("initial_pose_yaw", default_value="0.0"),
     ]
 
     return LaunchDescription(arguments + [
@@ -252,7 +235,9 @@ def generate_launch_description():
         scan_relay,
         map_server,
         amcl,
-        localization_lifecycle,
+        # Let Gazebo spawn M1 and publish odom->base_footprint before AMCL
+        # consumes its YAML initial_pose and starts broadcasting map->odom.
+        TimerAction(period=5.0, actions=[localization_lifecycle]),
         controller_server,
         planner_server,
         behavior_server,
@@ -265,6 +250,5 @@ def generate_launch_description():
         collision_monitor,
         TimerAction(period=24.0, actions=[safety_lifecycle]),
         watchdog,
-        TimerAction(period=22.0, actions=[initial_pose]),
         rviz,
     ])
