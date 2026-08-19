@@ -218,6 +218,12 @@ def generate_launch_description():
         DeclareLaunchArgument("gui", default_value="true"),
         DeclareLaunchArgument("rviz", default_value="true"),
         DeclareLaunchArgument(
+            "rviz_start_delay",
+            default_value="30.0",
+            description=(
+                "Delay RViz until Gazebo, localization, Nav2, and the "
+                "safety lifecycle nodes have had time to become active.")),
+        DeclareLaunchArgument(
             "software_lidar", default_value="true",
             description="Use deterministic software LaserScan for Gazebo Sim 6 / WSLg."),
         DeclareLaunchArgument(
@@ -250,5 +256,11 @@ def generate_launch_description():
         collision_monitor,
         TimerAction(period=24.0, actions=[safety_lifecycle]),
         watchdog,
-        rviz,
+        # RViz is visualization only.  Starting it while Gazebo is creating
+        # the OGRE2 GPU-LiDAR render context can starve the lifecycle service
+        # callback and make controller_server/change_state time out.  Delay
+        # it until after Nav2 and the safety chain are normally active.
+        TimerAction(
+            period=LaunchConfiguration("rviz_start_delay"),
+            actions=[rviz]),
     ])

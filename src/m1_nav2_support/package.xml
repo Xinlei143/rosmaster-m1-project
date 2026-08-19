@@ -8,7 +8,9 @@
 
   <buildtool_depend>ament_python</buildtool_depend>
   <depend>geometry_msgs</depend>
+  <depend>action_msgs</depend>
   <depend>nav_msgs</depend>
+  <depend>nav2_msgs</depend>
   <depend>rclpy</depend>
   <depend>ros_gz_bridge</depend>
   <depend>ros_gz_interfaces</depend>

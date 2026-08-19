@@ -395,7 +395,9 @@
         <friction>
           <ode>
             <mu>1.0</mu>
-            <mu2>0.1</mu2>
+            <!-- Leave the roller direction unconstrained, as in the
+                 Gazebo MecanumDrive reference model. -->
+            <mu2>0.0</mu2>
             <fdir1 ignition:expressed_in="base_footprint">1 -1 0</fdir1>
           </ode>
         </friction>
@@ -430,7 +432,7 @@
         <friction>
           <ode>
             <mu>1.0</mu>
-            <mu2>0.1</mu2>
+            <mu2>0.0</mu2>
             <fdir1 ignition:expressed_in="base_footprint">1 1 0</fdir1>
           </ode>
         </friction>
@@ -465,7 +467,7 @@
         <friction>
           <ode>
             <mu>1.0</mu>
-            <mu2>0.1</mu2>
+            <mu2>0.0</mu2>
             <fdir1 ignition:expressed_in="base_footprint">1 1 0</fdir1>
           </ode>
         </friction>
@@ -500,7 +502,7 @@
         <friction>
           <ode>
             <mu>1.0</mu>
-            <mu2>0.1</mu2>
+            <mu2>0.0</mu2>
             <fdir1 ignition:expressed_in="base_footprint">1 -1 0</fdir1>
           </ode>
         </friction>
