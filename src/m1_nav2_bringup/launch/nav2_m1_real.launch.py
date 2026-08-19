@@ -190,13 +190,13 @@ def generate_launch_description():
     )
 
     watchdog = Node(
-        package="imperative_navigation",
-        executable="imperative_cmd_watchdog",
-        name="imperative_cmd_watchdog",
+        package="m1_nav2_support",
+        executable="m1_cmd_watchdog",
+        name="m1_cmd_watchdog",
         output="screen",
         parameters=[{
             "use_sim_time": use_sim_time,
-            "input_topic": "/imperative/cmd_vel_raw",
+            "input_topic": "/m1/cmd_vel_raw",
             "output_topic": "/cmd_vel",
             "watchdog_timeout": 0.50,
             "publish_rate": 20.0,

@@ -15,9 +15,9 @@ from nav2_common.launch import RewrittenYaml
 
 def generate_launch_description():
     bringup_share = get_package_share_directory("m1_nav2_bringup")
-    imperative_share = get_package_share_directory("imperative_navigation")
+    support_share = get_package_share_directory("m1_nav2_support")
     gazebo_launch = os.path.join(
-        imperative_share, "launch", "imperative_m1_gazebo.launch.py")
+        support_share, "launch", "m1_gazebo.launch.py")
     slam_launch = os.path.join(
         get_package_share_directory("slam_toolbox"),
         "launch", "online_sync_launch.py")

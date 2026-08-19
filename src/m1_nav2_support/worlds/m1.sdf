@@ -1,9 +1,9 @@
 <?xml version="1.0" ?>
 <!-- M1-sized holonomic room with static and moving cylinder obstacles. -->
 <!-- The M1 robot itself is spawned from yahboomcar_M1_gazebo.urdf.xacro by
-     imperative_m1_gazebo.launch.py. -->
+     m1_gazebo.launch.py. -->
 <sdf version="1.9">
-  <world name="imperative_m1">
+  <world name="m1">
     <physics name="1ms" type="ignored">
       <max_step_size>0.001</max_step_size>
       <real_time_factor>1.0</real_time_factor>
@@ -16,7 +16,7 @@
             name="ignition::gazebo::systems::SceneBroadcaster"/>
     <plugin filename="ignition-gazebo-sensors-system"
             name="ignition::gazebo::systems::Sensors">
-      <render_engine>ogre</render_engine>
+      <render_engine>ogre2</render_engine>
     </plugin>
     <light type="directional" name="sun">
       <pose>0 0 10 0 0 0</pose>

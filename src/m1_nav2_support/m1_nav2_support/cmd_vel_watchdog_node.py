@@ -54,12 +54,12 @@ class CommandWatchdogState:
         return copy_twist(self.last_command)
 
 
-class ImperativeCmdWatchdog(Node):
+class M1CmdWatchdog(Node):
     """Forward fresh raw commands and continuously override stale ones to zero."""
 
     def __init__(self):
-        super().__init__("imperative_cmd_watchdog")
-        self.declare_parameter("input_topic", "/imperative/cmd_vel_raw")
+        super().__init__("m1_cmd_watchdog")
+        self.declare_parameter("input_topic", "/m1/cmd_vel_raw")
         self.declare_parameter("output_topic", "/cmd_vel")
         self.declare_parameter("watchdog_timeout", 0.60)
         self.declare_parameter("publish_rate", 20.0)
@@ -115,7 +115,7 @@ class ImperativeCmdWatchdog(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = ImperativeCmdWatchdog()
+    node = M1CmdWatchdog()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

@@ -26,13 +26,13 @@ class SoftwareLidar(Node):
     OBSTACLE_RADIUS = 0.30
     X_MIN, X_MAX = -4.0, 4.0
     Y_MIN, Y_MAX = -3.2, 3.2
-    # Must match the static cylinders in imperative_m1.sdf and the baseline
+    # Must match the static cylinders in m1.sdf and the baseline
     # map. The spawn at (-2.5, -1.5) is intentionally unobstructed.
     STATIC_CENTERS = [(0.0, 0.0), (-3.0, 2.2)]
 
     def __init__(self):
         super().__init__("software_lidar")
-        self.declare_parameter("dynamic_obstacles_topic", "/imperative/dynamic_obstacles")
+        self.declare_parameter("dynamic_obstacles_topic", "/m1/dynamic_obstacles")
         self.declare_parameter("scan_topic", "/sim_scan")
         # Dynamic centers originate from Gazebo pose feedback.  They must not
         # be retained forever: a stalled bridge must clear the simulated scan,

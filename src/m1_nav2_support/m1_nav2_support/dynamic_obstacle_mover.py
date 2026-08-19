@@ -25,10 +25,10 @@ class DynamicObstacleMover(Node):
         self.declare_parameter("random_seed", -1)
         self.declare_parameter("enabled", True)
         self.declare_parameter("motion_mode", "continuous")
-        self.declare_parameter("pose_service", "/world/imperative_m1/set_pose")
-        self.declare_parameter("obstacle_topic", "/imperative/dynamic_obstacles")
+        self.declare_parameter("pose_service", "/world/m1/set_pose")
+        self.declare_parameter("obstacle_topic", "/m1/dynamic_obstacles")
         self.declare_parameter("pose_publish_period", 1.0 / 30.0)
-        self.declare_parameter("gazebo_pose_topic", "/imperative/gazebo_dynamic_tf")
+        self.declare_parameter("gazebo_pose_topic", "/m1/gazebo_dynamic_tf")
 
         self.period = float(self.get_parameter("control_period").value)
         self.enabled = bool(self.get_parameter("enabled").value)
@@ -61,7 +61,7 @@ class DynamicObstacleMover(Node):
                 "acceleration": 0.55,
             },
         ]
-        # Keep this aligned with imperative_m1.sdf and software_lidar.py.
+        # Keep this aligned with m1.sdf and software_lidar.py.
         self.static_centers = [(0.0, 0.0), (-3.0, 2.2)]
         if self.motion_mode == "random_waypoint":
             for index, obstacle in enumerate(self.obstacles):
