@@ -115,7 +115,9 @@ bt_navigator_navigate_through_poses_rclcpp_node:
 controller_server:
   ros__parameters:
     use_sim_time: true
-    controller_frequency: 10.0
+    # Conservative baseline for straight-line tracking. Increase the speed
+    # envelope only after the physics and Nav2 regression tests pass.
+    controller_frequency: 20.0
     min_x_velocity_threshold: 0.001
     min_y_velocity_threshold: 0.001
     min_theta_velocity_threshold: 0.001
@@ -132,23 +134,26 @@ controller_server:
       plugin: nav2_controller::SimpleGoalChecker
       stateful: true
       xy_goal_tolerance: 0.12
-      yaw_goal_tolerance: 0.20
+      # M1 is used for ordinary navigation rather than docking.  Avoid
+      # forcing a collision-prone terminal rotation when the position is
+      # already reached near an obstacle.
+      yaw_goal_tolerance: 0.40
     FollowPath:
       plugin: nav2_mppi_controller::MPPIController
       # M1 is mecanum-drive, so MPPI must sample longitudinal, lateral and
       # rotational velocity together instead of using a differential model.
       motion_model: Omni
-      time_steps: 20
-      model_dt: 0.1
-      batch_size: 500
+      time_steps: 40
+      model_dt: 0.05
+      batch_size: 1000
       iteration_count: 1
-      vx_std: 0.12
-      vy_std: 0.14
-      wz_std: 0.25
-      vx_max: 0.6
-      vx_min: -0.4
-      vy_max: 0.4
-      wz_max: 1.0
+      vx_std: 0.10
+      vy_std: 0.08
+      wz_std: 0.15
+      vx_max: 0.30
+      vx_min: -0.20
+      vy_max: 0.25
+      wz_max: 0.8
       temperature: 0.3
       gamma: 0.015
       prune_distance: 1.5
@@ -174,14 +179,14 @@ controller_server:
         threshold_to_consider: 0.50
       PathAlignCritic:
         enabled: true
-        cost_weight: 5.0
+        cost_weight: 10.0
         max_path_occupancy_ratio: 0.07
         trajectory_point_step: 4
         threshold_to_consider: 0.5
       PathFollowCritic:
         enabled: true
-        cost_weight: 4.0
-        offset_from_furthest: 12
+        cost_weight: 5.0
+        offset_from_furthest: 6
         threshold_to_consider: 1.4
       PathAngleCritic:
         enabled: true
@@ -203,8 +208,10 @@ local_costmap:
       update_frequency: 10.0
       publish_frequency: 5.0
       rolling_window: true
-      width: 3
-      height: 3
+      # Give the rolling local map enough look-ahead for the GPU LiDAR while
+      # keeping it substantially smaller than the global map.
+      width: 5
+      height: 5
       resolution: 0.05
       footprint: "[[-0.15,-0.12],[-0.15,0.12],[0.15,0.12],[0.15,-0.12]]"
       footprint_padding: 0.02
@@ -224,16 +231,15 @@ local_costmap:
           # value of 0.0 cannot discard every laser return.
           min_obstacle_height: 0.0
           max_obstacle_height: 2.0
-          obstacle_max_range: 2.5
+          obstacle_max_range: 4.0
           obstacle_min_range: 0.05
-          raytrace_max_range: 3.0
+          raytrace_max_range: 4.5
           raytrace_min_range: 0.05
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         cost_scaling_factor: 3.0
-        # Keep the sampled MPPI rollouts away from a static cylinder before
-        # its laser returns enter Collision Monitor's near-body slowdown zone.
-        inflation_radius: 0.40
+        # Keep a small cost buffer around observed obstacles.
+        inflation_radius: 0.15
       always_send_full_costmap: true
 
 global_costmap:
@@ -270,7 +276,7 @@ global_costmap:
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         cost_scaling_factor: 3.0
-        inflation_radius: 0.40
+        inflation_radius: 0.15
       always_send_full_costmap: true
 
 map_server:
@@ -293,7 +299,10 @@ planner_server:
     planner_plugins: [GridBased]
     GridBased:
       plugin: nav2_navfn_planner/NavfnPlanner
-      tolerance: 0.30
+      # Keep a planner fallback close to the requested goal.  A 0.30 m
+      # replacement can look like a valid path in RViz while leaving the
+      # controller with a different terminal pose than the user selected.
+      tolerance: 0.10
       use_astar: false
       allow_unknown: true
 
@@ -343,8 +352,8 @@ velocity_smoother:
     smoothing_frequency: 20.0
     scale_velocities: true
     feedback: CLOSED_LOOP
-    max_velocity: [0.6, 0.4, 1.0]
-    min_velocity: [-0.4, -0.4, -1.0]
+    max_velocity: [0.3, 0.25, 0.8]
+    min_velocity: [-0.2, -0.25, -0.8]
     max_accel: [0.5, 0.5, 1.0]
     max_decel: [-0.5, -0.5, -1.0]
     odom_topic: /odom
