@@ -25,6 +25,7 @@ setup(
             "m1_cmd_watchdog = m1_nav2_support.cmd_vel_watchdog_node:main",
             "dynamic_obstacle_mover = m1_nav2_support.dynamic_obstacle_mover:main",
             "software_lidar = m1_nav2_support.software_lidar:main",
+            "m1_motion_diagnostic = m1_nav2_support.motion_diagnostic:main",
         ],
     },
 )

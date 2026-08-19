@@ -29,6 +29,15 @@
       <link name="link">
         <collision name="collision">
           <geometry><box><size>12 12 0.1</size></box></geometry>
+          <surface>
+            <friction>
+              <ode>
+                <!-- Match the high-friction ground used by Gazebo's
+                     reference MecanumDrive example. -->
+                <mu>50.0</mu>
+              </ode>
+            </friction>
+          </surface>
         </collision>
         <visual name="visual">
           <geometry><box><size>12 12 0.1</size></box></geometry>
