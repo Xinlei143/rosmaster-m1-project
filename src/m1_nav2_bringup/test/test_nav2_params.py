@@ -79,8 +79,8 @@ def test_local_costmap_has_a_dynamic_obstacle_lookahead_window():
     scan = parameters["obstacle_layer"]["scan"]
 
     assert parameters["rolling_window"] is True
-    assert parameters["width"] == 3
-    assert parameters["height"] == 3
+    assert parameters["width"] == 5
+    assert parameters["height"] == 5
     assert scan["obstacle_max_range"] == 4.0
     assert scan["raytrace_max_range"] == 4.5
     assert parameters["inflation_layer"]["inflation_radius"] == 0.4
@@ -101,9 +101,9 @@ def test_mppi_uses_supported_omni_velocity_constraints():
     assert follow_path["vx_std"] == 0.3
     assert follow_path["vy_std"] == 0.3
     assert follow_path["wz_std"] == 0.5
-    assert follow_path["vx_max"] == 1.0
-    assert follow_path["vx_min"] == -1.0
-    assert follow_path["vy_max"] == 1.0
+    assert follow_path["vx_max"] == 0.5
+    assert follow_path["vx_min"] == -0.5
+    assert follow_path["vy_max"] == 0.5
     assert follow_path["wz_max"] == 0.8
 
     for unsupported_parameter in (
@@ -123,8 +123,8 @@ def test_velocity_smoother_matches_mppi_limits_and_acceleration_profile():
     assert smoother["smoothing_frequency"] == 20.0
     assert smoother["scale_velocities"] is True
     assert smoother["feedback"] == "CLOSED_LOOP"
-    assert smoother["max_velocity"] == [1.0, 1.0, 0.8]
-    assert smoother["min_velocity"] == [-1.0, -1.0, -0.8]
+    assert smoother["max_velocity"] == [0.5, 0.5, 0.8]
+    assert smoother["min_velocity"] == [-0.5, -0.5, -0.8]
     assert smoother["max_accel"] == [0.8, 0.8, 1.0]
     assert smoother["max_decel"] == [-0.8, -0.8, -1.0]
 
