@@ -84,6 +84,7 @@ def test_local_costmap_has_a_dynamic_obstacle_lookahead_window():
     assert scan["obstacle_max_range"] == 4.0
     assert scan["raytrace_max_range"] == 4.5
     assert parameters["inflation_layer"]["inflation_radius"] == 0.4
+    assert parameters["always_send_full_costmap"] is False
 
 
 def test_mppi_uses_supported_omni_velocity_constraints():
