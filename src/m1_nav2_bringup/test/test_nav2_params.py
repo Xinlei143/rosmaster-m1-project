@@ -6,6 +6,7 @@ import yaml
 
 
 PARAMS = Path(__file__).parents[1] / "config" / "nav2_params.yaml"
+GAZEBO_LAUNCH = Path(__file__).parents[1] / "launch" / "nav2_m1_gazebo.launch.py"
 
 
 def costmap_scan_source(costmap_name):
@@ -40,6 +41,12 @@ def planner_parameters():
     ]
 
 
+def collision_monitor_parameters():
+    return yaml.safe_load(PARAMS.read_text())["collision_monitor"][
+        "ros__parameters"
+    ]
+
+
 def costmap_parameters(costmap_name):
     return yaml.safe_load(PARAMS.read_text())[costmap_name][costmap_name][
         "ros__parameters"
@@ -52,6 +59,11 @@ def test_gpu_lidar_scan_has_an_explicit_observation_height_window():
         scan = costmap_scan_source(costmap_name)
         assert scan["min_obstacle_height"] == 0.0
         assert scan["max_obstacle_height"] >= 0.175
+
+
+def test_nav2_gazebo_defaults_to_native_gpu_lidar():
+    launch_source = GAZEBO_LAUNCH.read_text()
+    assert '"software_lidar", default_value="false"' in launch_source
 
 
 def test_gpu_lidar_scan_marks_and_clears_both_costmaps():
@@ -67,10 +79,11 @@ def test_local_costmap_has_a_dynamic_obstacle_lookahead_window():
     scan = parameters["obstacle_layer"]["scan"]
 
     assert parameters["rolling_window"] is True
-    assert parameters["width"] == 5
-    assert parameters["height"] == 5
+    assert parameters["width"] == 3
+    assert parameters["height"] == 3
     assert scan["obstacle_max_range"] == 4.0
     assert scan["raytrace_max_range"] == 4.5
+    assert parameters["inflation_layer"]["inflation_radius"] == 0.4
 
 
 def test_mppi_uses_supported_omni_velocity_constraints():
@@ -82,13 +95,14 @@ def test_mppi_uses_supported_omni_velocity_constraints():
     assert controller["controller_frequency"] == 20.0
     assert follow_path["time_steps"] == 40
     assert follow_path["model_dt"] == 0.05
-    assert follow_path["batch_size"] == 1000
-    assert follow_path["vx_std"] == 0.10
-    assert follow_path["vy_std"] == 0.08
-    assert follow_path["wz_std"] == 0.15
-    assert follow_path["vx_max"] == 0.30
-    assert follow_path["vx_min"] == -0.20
-    assert follow_path["vy_max"] == 0.25
+    assert follow_path["batch_size"] == 500
+    assert follow_path["iteration_count"] == 1
+    assert follow_path["vx_std"] == 0.3
+    assert follow_path["vy_std"] == 0.3
+    assert follow_path["wz_std"] == 0.5
+    assert follow_path["vx_max"] == 1.0
+    assert follow_path["vx_min"] == -1.0
+    assert follow_path["vy_max"] == 1.0
     assert follow_path["wz_max"] == 0.8
 
     for unsupported_parameter in (
@@ -108,10 +122,33 @@ def test_velocity_smoother_matches_mppi_limits_and_acceleration_profile():
     assert smoother["smoothing_frequency"] == 20.0
     assert smoother["scale_velocities"] is True
     assert smoother["feedback"] == "CLOSED_LOOP"
-    assert smoother["max_velocity"] == [0.3, 0.25, 0.8]
-    assert smoother["min_velocity"] == [-0.2, -0.25, -0.8]
-    assert smoother["max_accel"] == [0.5, 0.5, 1.0]
-    assert smoother["max_decel"] == [-0.5, -0.5, -1.0]
+    assert smoother["max_velocity"] == [1.0, 1.0, 0.8]
+    assert smoother["min_velocity"] == [-1.0, -1.0, -0.8]
+    assert smoother["max_accel"] == [0.8, 0.8, 1.0]
+    assert smoother["max_decel"] == [-0.8, -0.8, -1.0]
+
+
+def test_mppi_path_alignment_and_forward_preference_weights():
+    follow_path = controller_follow_path()
+
+    assert follow_path["PathAlignCritic"]["cost_weight"] == 4.0
+    assert follow_path["PreferForwardCritic"]["enabled"] is True
+    assert follow_path["PreferForwardCritic"]["cost_weight"] == 1.0
+    assert follow_path["GoalCritic"]["cost_weight"] == 8.0
+
+
+def test_collision_monitor_uses_requested_slowdown_and_stop_polygons():
+    parameters = collision_monitor_parameters()
+    slow = parameters["PolygonSlow"]
+    stop = parameters["PolygonStop"]
+
+    assert slow["points"] == [0.50, 0.40, 0.50, -0.40, -0.50, -0.40, -0.50, 0.40]
+    assert slow["action_type"] == "slowdown"
+    assert slow["slowdown_ratio"] == 0.40
+    assert slow["max_points"] == 4
+    assert stop["points"] == [0.30, 0.25, 0.30, -0.25, -0.30, -0.25, -0.30, 0.25]
+    assert stop["action_type"] == "stop"
+    assert stop["max_points"] == 4
 
 
 def test_terminal_goal_and_planner_tolerances_are_consistent_for_near_obstacles():

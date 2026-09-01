@@ -224,7 +224,7 @@ def generate_launch_description():
                 "Delay RViz until Gazebo, localization, Nav2, and the "
                 "safety lifecycle nodes have had time to become active.")),
         DeclareLaunchArgument(
-            "software_lidar", default_value="true",
+            "software_lidar", default_value="false",
             description="Use deterministic software LaserScan for Gazebo Sim 6 / WSLg."),
         DeclareLaunchArgument(
             "dynamic_obstacles", default_value="true",

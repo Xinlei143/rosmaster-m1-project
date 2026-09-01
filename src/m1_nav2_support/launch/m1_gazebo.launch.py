@@ -76,10 +76,10 @@ def generate_launch_description():
     bridge = Node(
         package="ros_gz_bridge",
         executable="parameter_bridge",
+        name="m1_gazebo_bridge_core",
         arguments=[
             "/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
             "/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry",
-            "/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
             "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
             "/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V",
             "/model/moving_obstacle_1/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
@@ -90,6 +90,15 @@ def generate_launch_description():
         ],
         remappings=[
             ("/world/m1/dynamic_pose/info", "/m1/gazebo_dynamic_tf"),
+        ],
+        output="screen",
+    )
+    scan_bridge = Node(
+        package="ros_gz_bridge",
+        executable="parameter_bridge",
+        name="m1_gazebo_bridge_scan",
+        arguments=[
+            "/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
         ],
         output="screen",
     )
@@ -151,6 +160,7 @@ def generate_launch_description():
         robot_state_publisher,
         TimerAction(period=2.0, actions=[spawn_robot]),
         bridge,
+        scan_bridge,
         dynamic_obstacle_mover,
         software_lidar,
     ])

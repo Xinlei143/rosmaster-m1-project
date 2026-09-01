@@ -30,7 +30,7 @@ source install/setup.bash
 
 ```bash
 ros2 launch m1_nav2_bringup nav2_m1_gazebo.launch.py \
-  gui:=true rviz:=true dynamic_obstacles:=true
+  gui:=true rviz:=true dynamic_obstacles:=true software_lidar:=false
 ```
 
 Gazebo 启动后，在 RViz 选择 **2D Goal Pose** 设置目标点。MPPI 会依据实时 `/scan` 更新的 Costmap 进行静态和反应式动态避障；若无安全可行轨迹，安全行为是减速或停车。

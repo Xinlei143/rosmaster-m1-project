@@ -578,8 +578,8 @@
       <wheel_radius>0.04</wheel_radius>
       <topic>/cmd_vel</topic>
       <odom_topic>/wheel_odom</odom_topic>
-      <min_acceleration>-1.0</min_acceleration>
-      <max_acceleration>1.0</max_acceleration>
+      <min_acceleration>-0.8</min_acceleration>
+      <max_acceleration>0.8</max_acceleration>
     </plugin>
     <plugin filename="ignition-gazebo-odometry-publisher-system"
             name="ignition::gazebo::systems::OdometryPublisher">

@@ -140,19 +140,19 @@ controller_server:
       yaw_goal_tolerance: 0.40
     FollowPath:
       plugin: nav2_mppi_controller::MPPIController
-      # M1 is mecanum-drive, so MPPI must sample longitudinal, lateral and
-      # rotational velocity together instead of using a differential model.
+      # M1 is mecanum-drive, so MPPI samples longitudinal, lateral and
+      # rotational velocity together using the omni motion model.
       motion_model: Omni
       time_steps: 40
       model_dt: 0.05
-      batch_size: 1000
+      batch_size: 500
       iteration_count: 1
-      vx_std: 0.10
-      vy_std: 0.08
-      wz_std: 0.15
-      vx_max: 0.30
-      vx_min: -0.20
-      vy_max: 0.25
+      vx_std: 0.3
+      vy_std: 0.3
+      wz_std: 0.5
+      vx_max: 1.0
+      vx_min: -1.0
+      vy_max: 1.0
       wz_max: 0.8
       temperature: 0.3
       gamma: 0.015
@@ -171,7 +171,7 @@ controller_server:
         near_goal_distance: 0.50
       GoalCritic:
         enabled: true
-        cost_weight: 5.0
+        cost_weight: 8.0
         threshold_to_consider: 1.4
       GoalAngleCritic:
         enabled: true
@@ -179,7 +179,7 @@ controller_server:
         threshold_to_consider: 0.50
       PathAlignCritic:
         enabled: true
-        cost_weight: 10.0
+        cost_weight: 4.0
         max_path_occupancy_ratio: 0.07
         trajectory_point_step: 4
         threshold_to_consider: 0.5
@@ -194,7 +194,8 @@ controller_server:
         offset_from_furthest: 4
         threshold_to_consider: 0.5
       PreferForwardCritic:
-        enabled: false
+        enabled: true
+        cost_weight: 1.0
       TwirlingCritic:
         enabled: true
         cost_weight: 10.0
@@ -206,12 +207,12 @@ local_costmap:
       global_frame: odom
       robot_base_frame: base_footprint
       update_frequency: 10.0
-      publish_frequency: 5.0
+      publish_frequency: 10.0
       rolling_window: true
       # Give the rolling local map enough look-ahead for the GPU LiDAR while
       # keeping it substantially smaller than the global map.
-      width: 5
-      height: 5
+      width: 3
+      height: 3
       resolution: 0.05
       footprint: "[[-0.15,-0.12],[-0.15,0.12],[0.15,0.12],[0.15,-0.12]]"
       footprint_padding: 0.02
@@ -239,7 +240,7 @@ local_costmap:
         plugin: nav2_costmap_2d::InflationLayer
         cost_scaling_factor: 3.0
         # Keep a small cost buffer around observed obstacles.
-        inflation_radius: 0.15
+        inflation_radius: 0.4
       always_send_full_costmap: true
 
 global_costmap:
@@ -352,10 +353,10 @@ velocity_smoother:
     smoothing_frequency: 20.0
     scale_velocities: true
     feedback: CLOSED_LOOP
-    max_velocity: [0.3, 0.25, 0.8]
-    min_velocity: [-0.2, -0.25, -0.8]
-    max_accel: [0.5, 0.5, 1.0]
-    max_decel: [-0.5, -0.5, -1.0]
+    max_velocity: [1.0, 1.0, 0.8]
+    min_velocity: [-1.0, -1.0, -0.8]
+    max_accel: [0.8, 0.8, 1.0]
+    max_decel: [-0.8, -0.8, -1.0]
     odom_topic: /odom
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]
@@ -376,11 +377,11 @@ collision_monitor:
     polygons: [PolygonSlow, PolygonStop]
     PolygonSlow:
       type: polygon
-      points: [0.30, 0.25, 0.30, -0.25, -0.30, -0.25, -0.30, 0.25]
+      points: [0.50, 0.40, 0.50, -0.40, -0.50, -0.40, -0.50, 0.40]
       action_type: slowdown
       # Keep the robot visibly moving while a near obstacle is monitored.
       # Actual collision is still handled by the smaller PolygonStop zone.
-      slowdown_ratio: 0.65
+      slowdown_ratio: 0.40
       max_points: 4
       visualize: true
       polygon_pub_topic: polygon_slowdown
@@ -389,7 +390,7 @@ collision_monitor:
       type: polygon
       # M1 footprint (0.30 x 0.24 m) plus the same 0.02 m padding used by
       # the Costmaps. Stop only on imminent body intrusion, not nearby motion.
-      points: [0.17, 0.14, 0.17, -0.14, -0.17, -0.14, -0.17, 0.14]
+      points: [0.30, 0.25, 0.30, -0.25, -0.30, -0.25, -0.30, 0.25]
       action_type: stop
       max_points: 4
       visualize: true
