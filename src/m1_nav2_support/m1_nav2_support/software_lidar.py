@@ -32,6 +32,7 @@ class SoftwareLidar(Node):
 
     def __init__(self):
         super().__init__("software_lidar")
+        self.declare_parameter("pose_topic", "/odom")
         self.declare_parameter("dynamic_obstacles_topic", "/m1/dynamic_obstacles")
         self.declare_parameter("scan_topic", "/sim_scan")
         # Dynamic centers originate from Gazebo pose feedback.  They must not
@@ -44,7 +45,9 @@ class SoftwareLidar(Node):
         self.dynamic_centers = []
         self.last_dynamic_update_ns = None
         sensor_qos = QoSProfile(depth=5, reliability=ReliabilityPolicy.BEST_EFFORT)
-        self.create_subscription(Odometry, "/odom", self.odom_callback, 10)
+        self.create_subscription(
+            Odometry, self.get_parameter("pose_topic").value,
+            self.odom_callback, 10)
         self.create_subscription(
             PoseArray, self.get_parameter("dynamic_obstacles_topic").value,
             self.dynamic_callback, 10)

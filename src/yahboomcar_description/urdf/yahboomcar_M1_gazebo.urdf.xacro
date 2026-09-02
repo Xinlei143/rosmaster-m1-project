@@ -587,8 +587,8 @@
       <robot_base_frame>base_footprint</robot_base_frame>
       <child_frame_id>base_footprint</child_frame_id>
       <odom_publish_frequency>30</odom_publish_frequency>
-      <odom_topic>/odom</odom_topic>
-      <tf_topic>/tf</tf_topic>
+      <odom_topic>/ground_truth/odom</odom_topic>
+      <tf_topic>/ground_truth/tf</tf_topic>
       <dimensions>2</dimensions>
     </plugin>
   </gazebo>

@@ -61,7 +61,7 @@ class M1CmdWatchdog(Node):
         super().__init__("m1_cmd_watchdog")
         self.declare_parameter("input_topic", "/m1/cmd_vel_raw")
         self.declare_parameter("output_topic", "/cmd_vel")
-        self.declare_parameter("watchdog_timeout", 0.60)
+        self.declare_parameter("watchdog_timeout", 0.40)
         self.declare_parameter("publish_rate", 20.0)
 
         timeout = float(self.get_parameter("watchdog_timeout").value)

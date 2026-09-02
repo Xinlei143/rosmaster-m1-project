@@ -30,6 +30,10 @@ from imperative_navigation.algorithm_loader import load_algorithm
 from imperative_navigation.planner_timing import MeasuredPlannerPeriod
 from imperative_navigation.track_stability import ConfirmedTrackFilter
 from imperative_navigation.holonomic_local_planner import choose_velocity, goal_is_dynamically_blocked
+from imperative_navigation.localization_geometry import (
+    inverse_transform_point_2d,
+    resolve_goal_odom,
+)
 
 
 def configure_planner_robot_clearance(algorithm, robot_radius, safety_margin,
@@ -94,6 +98,8 @@ class ImperativeM1Controller(Node):
             ("trajectory_speed_samples", 4), ("dynamic_obstacle_radius", 0.20),
             ("scan_topic", "/scan"), ("odom_topic", "/odom"),
             ("command_topic", "/imperative/cmd_vel_raw"), ("odom_frame", "odom"),
+            ("goal_frame", "odom"), ("global_frame", "map"),
+            ("global_tf_max_age", 0.5),
             ("scan_timeout", 0.50), ("odom_timeout", 0.50),
             ("tf_max_age", 0.30),
             # Raw laser points always remain collision obstacles. These
@@ -123,10 +129,12 @@ class ImperativeM1Controller(Node):
         # walls come from its laser map, so disable those artificial bounds.
         self.algorithm.ROOM_X_MIN = self.algorithm.ROOM_Y_MIN = -1000.0
         self.algorithm.ROOM_X_MAX = self.algorithm.ROOM_Y_MAX = 1000.0
-        self.final_goal = torch.tensor([
+        self.configured_goal = torch.tensor([
             self.get_parameter("goal_x").value, self.get_parameter("goal_y").value],
             dtype=torch.float32)
-        self.algorithm.GOAL = self.final_goal.clone()
+        self.final_goal_map = self.configured_goal.clone()
+        self.final_goal_odom = self.configured_goal.clone()
+        self.algorithm.GOAL = self.final_goal_odom.clone()
         self.algorithm.GOAL_TOLERANCE = float(self.get_parameter("goal_tolerance").value)
         self.algorithm.DT = self.period
         self.algorithm.MAX_SPEED = float(self.get_parameter("max_speed").value)
@@ -202,6 +210,7 @@ class ImperativeM1Controller(Node):
         self.last_debug_time = -1
         self.last_bypass_log_time = -1
         self.last_dry_run_log_time = -1
+        self.last_global_tf = None
         self.scan_hit_count = 0
         self.nearest_range = float("nan")
         self.create_timer(self.period, self.control_callback,
@@ -260,6 +269,47 @@ class ImperativeM1Controller(Node):
                 self.velocity_world.clone(),
                 self.last_odom_time,
             )
+
+    def resolve_current_goal(self, now_ns):
+        """Resolve the configured goal into the controller's odom frame."""
+        goal_frame = str(self.get_parameter("goal_frame").value)
+        odom_frame = str(self.get_parameter("odom_frame").value)
+        if goal_frame == odom_frame:
+            self.last_global_tf = None
+            self.final_goal_map = self.configured_goal.clone()
+            self.final_goal_odom = self.configured_goal.clone()
+            return self.final_goal_odom.clone()
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                odom_frame, goal_frame, Time())
+        except tf2_ros.TransformException as error:
+            self.last_global_tf = None
+            self.warn_throttled(
+                f"Global localization transform unavailable ({error}); publishing stop.")
+            return None
+        goal = resolve_goal_odom(
+            (float(self.configured_goal[0]), float(self.configured_goal[1])),
+            transform,
+            now_ns,
+            float(self.get_parameter("global_tf_max_age").value),
+        )
+        if goal is None:
+            self.last_global_tf = None
+            self.warn_throttled(
+                "Global localization transform unavailable/stale; publishing stop.")
+            return None
+        self.last_global_tf = transform
+        self.final_goal_map = self.configured_goal.clone()
+        self.final_goal_odom = torch.tensor(goal, dtype=torch.float32)
+        return self.final_goal_odom.clone()
+
+    def position_in_global_frame(self, position_odom):
+        """Convert the current odom pose to map without changing local state."""
+        if self.last_global_tf is None:
+            return position_odom.clone()
+        point = inverse_transform_point_2d(
+            (float(position_odom[0]), float(position_odom[1])), self.last_global_tf)
+        return torch.tensor(point, dtype=torch.float32)
 
     def input_is_fresh(self, now, scan_time, position, odom_time):
         if scan_time is None or position is None or odom_time is None:
@@ -375,7 +425,7 @@ class ImperativeM1Controller(Node):
         speed = min(float(self.get_parameter("bypass_speed").value), distance)
         return speed * offset / distance
 
-    def update_static_bypass_goal(self, position, lidar_points, lidar_hits):
+    def update_static_bypass_goal(self, position, lidar_points, lidar_hits, final_goal_odom):
         """Advance a fixed three-phase holonomic route around one blocker.
 
         Phases are ``lane`` (pure side step), ``pass`` (move forward beyond
@@ -393,14 +443,14 @@ class ImperativeM1Controller(Node):
         if (bool(self.get_parameter("trajectory_planner_enabled").value) or
                 not bool(self.get_parameter("static_bypass_enabled").value)):
             self.clear_static_bypass()
-            self.algorithm.GOAL = self.final_goal
+            self.algorithm.GOAL = final_goal_odom
             return False
 
-        goal_offset = self.final_goal - position
+        goal_offset = final_goal_odom - position
         goal_distance = torch.linalg.norm(goal_offset)
         if goal_distance < 1e-6:
             self.clear_static_bypass()
-            self.algorithm.GOAL = self.final_goal
+            self.algorithm.GOAL = final_goal_odom
             return False
         forward = goal_offset / goal_distance
         lateral = torch.stack((-forward[1], forward[0]))
@@ -419,14 +469,14 @@ class ImperativeM1Controller(Node):
                     # explicitly beyond the obstacle in self.bypass_forward,
                     # so it cannot rotate away as the M1 translates sideways.
                     self.bypass_phase = "exit"
-                    self.bypass_goal = self.final_goal.clone()
+                    self.bypass_goal = final_goal_odom.clone()
                     self.get_logger().info(
                         "Static bypass obstacle passed; returning directly to final goal (%.2f, %.2f)." %
-                        (self.final_goal[0], self.final_goal[1]))
+                        (final_goal_odom[0], final_goal_odom[1]))
                 else:
                     self.get_logger().info("Static bypass complete; final goal reached.")
                     self.clear_static_bypass()
-                    self.algorithm.GOAL = self.final_goal
+                    self.algorithm.GOAL = final_goal_odom
                     return False
                 self.previous_plan = None
             self.algorithm.GOAL = self.bypass_goal
@@ -434,7 +484,7 @@ class ImperativeM1Controller(Node):
 
         points = lidar_points[lidar_hits]
         if not len(points):
-            self.algorithm.GOAL = self.final_goal
+            self.algorithm.GOAL = final_goal_odom
             return False
         forward_distances = points @ forward
         lateral_distances = points @ lateral
@@ -442,7 +492,7 @@ class ImperativeM1Controller(Node):
                      (forward_distances <= float(self.get_parameter("bypass_trigger_distance").value)) &
                      (torch.abs(lateral_distances) <= float(self.get_parameter("bypass_lateral_gate").value)))
         if not torch.any(candidate):
-            self.algorithm.GOAL = self.final_goal
+            self.algorithm.GOAL = final_goal_odom
             return False
 
         candidate_indices = torch.where(candidate)[0]
@@ -497,7 +547,7 @@ class ImperativeM1Controller(Node):
             ("left" if self.bypass_side > 0 else "right", selection,
              self.bypass_lane_goal[0], self.bypass_lane_goal[1],
              self.bypass_pass_goal[0], self.bypass_pass_goal[1],
-             self.final_goal[0], self.final_goal[1]))
+             final_goal_odom[0], final_goal_odom[1]))
         return True
 
     def control_callback(self):
@@ -513,6 +563,11 @@ class ImperativeM1Controller(Node):
         if not inputs_fresh:
             self.publish_stop()
             return
+        final_goal_odom = self.resolve_current_goal(now)
+        if final_goal_odom is None:
+            self.publish_stop()
+            return
+        self.algorithm.GOAL = final_goal_odom
         profile = {}
         detection_profile = {}
         callback_start = time.perf_counter()
@@ -528,7 +583,8 @@ class ImperativeM1Controller(Node):
             self.publish_stop()
             return
 
-        static_bypass_active = self.update_static_bypass_goal(position, lidar_points, lidar_hits)
+        static_bypass_active = self.update_static_bypass_goal(
+            position, lidar_points, lidar_hits, final_goal_odom)
         bypass_velocity_world = self.bypass_velocity(position) if static_bypass_active else None
         # The emergency tube must be aligned with the command about to be
         # issued.  During a side-step, using last cycle's forward velocity
@@ -602,7 +658,13 @@ class ImperativeM1Controller(Node):
                     self.map_points, world_points, dynamic_centers, dynamic_radii)
                 profile["update_slam_map"] = time.perf_counter() - stage_start
 
-                if torch.linalg.norm(self.final_goal - position) <= self.algorithm.GOAL_TOLERANCE:
+                position_global = self.position_in_global_frame(position)
+                goal_reached_distance = (
+                    torch.linalg.norm(self.final_goal_map - position_global)
+                    if str(self.get_parameter("goal_frame").value) ==
+                    str(self.get_parameter("global_frame").value)
+                    else torch.linalg.norm(final_goal_odom - position))
+                if goal_reached_distance <= self.algorithm.GOAL_TOLERANCE:
                     self.get_logger().info("Goal reached; publishing stop.")
                     self.publish_stop()
                     self.publish_visualization(position, current_velocity_world)
@@ -613,10 +675,10 @@ class ImperativeM1Controller(Node):
                     clearance = (float(self.get_parameter("robot_radius").value) +
                                  float(self.get_parameter("safety_margin").value))
                     self.yielding_for_goal = goal_is_dynamically_blocked(
-                        self.final_goal, self.planning_tracks, clearance,
+                        final_goal_odom, self.planning_tracks, clearance,
                         float(self.get_parameter("dynamic_obstacle_radius").value))
                     velocity_world, trajectory, trajectory_clearance = choose_velocity(
-                        position, current_velocity_world, self.final_goal, world_points,
+                        position, current_velocity_world, final_goal_odom, world_points,
                         self.planning_tracks,
                         max_speed=float(self.get_parameter("max_speed").value),
                         max_acceleration=float(self.get_parameter("max_acceleration").value),
@@ -661,6 +723,10 @@ class ImperativeM1Controller(Node):
         planner_compute_time = time.perf_counter() - callback_start
         if self.last_debug_time < 0 or now - self.last_debug_time >= 1_000_000_000:
             self.last_debug_time = now
+            global_error = (torch.linalg.norm(self.final_goal_map - position_global)
+                            if str(self.get_parameter("goal_frame").value) ==
+                            str(self.get_parameter("global_frame").value)
+                            else torch.linalg.norm(final_goal_odom - position))
             self.get_logger().info(
                 "scan_age=%.3f s odom_age=%.3f s tf_age=%.3f s planner_dt=%.3f s planner_compute_time=%.3f s; "
                 "LaserScan->points=%.3f s cluster_detection=%.3f s update_tracks=%.3f s "
@@ -669,7 +735,8 @@ class ImperativeM1Controller(Node):
                 "cluster_filter=%.3f s cluster_geometry=%.3f s finalize=%.3f s; "
                 "hits=%d clusters=%d detections=%d small_clusters=%d large_clusters=%d]; "
                 "pos=(%.2f, %.2f) goal=(%.2f, %.2f) hits=%d raw_tracks=%d confirmed_tracks=%d "
-                "map_points=%d nearest=%.2f cmd=(%.2f, %.2f)" % (
+                    "map_points=%d nearest=%.2f cmd=(%.2f, %.2f) "
+                    "global_pose=(%.2f, %.2f) global_goal=(%.2f, %.2f) global_error=%.3f" % (
                     scan_age, odom_age, tf_age, planner_dt, planner_compute_time,
                     profile["laser_scan_to_points"], profile["cluster_detection"],
                     profile["update_tracks"], profile["update_slam_map"],
@@ -683,7 +750,9 @@ class ImperativeM1Controller(Node):
                     position[0], position[1], self.algorithm.GOAL[0], self.algorithm.GOAL[1],
                     self.scan_hit_count, len(self.tracks), len(self.planning_tracks),
                     len(self.map_points), self.nearest_range,
-                    velocity_world[0], velocity_world[1]))
+                    velocity_world[0], velocity_world[1],
+                    position_global[0], position_global[1],
+                    self.final_goal_map[0], self.final_goal_map[1], global_error))
 
     def publish_body_velocity(self, velocity_world, yaw):
         # Keep sensing, tracking, planning, and visualization active in

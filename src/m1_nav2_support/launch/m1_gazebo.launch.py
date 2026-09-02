@@ -11,7 +11,7 @@ from launch.actions import (
     SetEnvironmentVariable,
     TimerAction,
 )
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
@@ -79,9 +79,9 @@ def generate_launch_description():
         name="m1_gazebo_bridge_core",
         arguments=[
             "/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
-            "/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry",
-            "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
-            "/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V",
+            "/ground_truth/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry",
+            "/world/m1/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
+            "/ground_truth/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V",
             "/model/moving_obstacle_1/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
             "/model/moving_obstacle_2/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
             "/model/moving_obstacle_3/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
@@ -89,6 +89,7 @@ def generate_launch_description():
             "/world/m1/set_pose@ros_gz_interfaces/srv/SetEntityPose",
         ],
         remappings=[
+            ("/world/m1/clock", "/clock"),
             ("/world/m1/dynamic_pose/info", "/m1/gazebo_dynamic_tf"),
         ],
         output="screen",
@@ -97,6 +98,7 @@ def generate_launch_description():
         package="ros_gz_bridge",
         executable="parameter_bridge",
         name="m1_gazebo_bridge_scan",
+        condition=UnlessCondition(LaunchConfiguration("software_lidar")),
         arguments=[
             "/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
         ],
@@ -122,7 +124,39 @@ def generate_launch_description():
         name="software_lidar",
         condition=IfCondition(LaunchConfiguration("software_lidar")),
         output="screen",
-        parameters=[{"use_sim_time": True}],
+        parameters=[{
+            "use_sim_time": True,
+            "pose_topic": "/ground_truth/odom",
+        }],
+    )
+    odom_slip_simulator = Node(
+        package="m1_nav2_support",
+        executable="odom_slip_simulator",
+        name="odom_slip_simulator",
+        output="screen",
+        parameters=[{
+            "use_sim_time": True,
+            "enabled": LaunchConfiguration("slip_enabled"),
+            "profile": LaunchConfiguration("slip_profile"),
+            "x_scale": LaunchConfiguration("odom_x_scale"),
+            "y_scale": LaunchConfiguration("odom_y_scale"),
+            "yaw_scale": LaunchConfiguration("odom_yaw_scale"),
+            "x_bias_per_second": LaunchConfiguration("odom_x_bias"),
+            "y_bias_per_second": LaunchConfiguration("odom_y_bias"),
+            "yaw_bias_per_second": LaunchConfiguration("odom_yaw_bias"),
+            "x_noise_std": LaunchConfiguration("odom_x_noise_std"),
+            "y_noise_std": LaunchConfiguration("odom_y_noise_std"),
+            "yaw_noise_std": LaunchConfiguration("odom_yaw_noise_std"),
+            "random_walk_xy_std": LaunchConfiguration("odom_random_walk_xy_std"),
+            "random_walk_yaw_std": LaunchConfiguration("odom_random_walk_yaw_std"),
+            "random_seed": LaunchConfiguration("slip_seed"),
+            "burst_enabled": LaunchConfiguration("burst_enabled"),
+            "burst_start": LaunchConfiguration("burst_start"),
+            "burst_duration": LaunchConfiguration("burst_duration"),
+            "burst_x_scale": LaunchConfiguration("burst_x_scale"),
+            "burst_y_scale": LaunchConfiguration("burst_y_scale"),
+            "burst_yaw_scale": LaunchConfiguration("burst_yaw_scale"),
+        }],
     )
 
     # Gazebo Sim resolves package:// mesh URIs as model:// package paths.  The
@@ -154,6 +188,26 @@ def generate_launch_description():
             description=(
                 "Obstacle motion: continuous smooth-random motion or "
                 "random_waypoint for waypoint patrol.")),
+        DeclareLaunchArgument("slip_enabled", default_value="true"),
+        DeclareLaunchArgument("slip_profile", default_value="none"),
+        DeclareLaunchArgument("slip_seed", default_value="20260902"),
+        DeclareLaunchArgument("odom_x_scale", default_value="1.0"),
+        DeclareLaunchArgument("odom_y_scale", default_value="1.0"),
+        DeclareLaunchArgument("odom_yaw_scale", default_value="1.0"),
+        DeclareLaunchArgument("odom_x_bias", default_value="0.0"),
+        DeclareLaunchArgument("odom_y_bias", default_value="0.0"),
+        DeclareLaunchArgument("odom_yaw_bias", default_value="0.0"),
+        DeclareLaunchArgument("odom_x_noise_std", default_value="0.0"),
+        DeclareLaunchArgument("odom_y_noise_std", default_value="0.0"),
+        DeclareLaunchArgument("odom_yaw_noise_std", default_value="0.0"),
+        DeclareLaunchArgument("odom_random_walk_xy_std", default_value="0.0"),
+        DeclareLaunchArgument("odom_random_walk_yaw_std", default_value="0.0"),
+        DeclareLaunchArgument("burst_enabled", default_value="false"),
+        DeclareLaunchArgument("burst_start", default_value="0.0"),
+        DeclareLaunchArgument("burst_duration", default_value="0.0"),
+        DeclareLaunchArgument("burst_x_scale", default_value="1.0"),
+        DeclareLaunchArgument("burst_y_scale", default_value="1.0"),
+        DeclareLaunchArgument("burst_yaw_scale", default_value="1.0"),
         SetEnvironmentVariable("IGN_GAZEBO_RESOURCE_PATH", ignition_resource_path),
         SetEnvironmentVariable("GZ_SIM_RESOURCE_PATH", gz_resource_path),
         OpaqueFunction(function=launch_gazebo),
@@ -162,5 +216,6 @@ def generate_launch_description():
         bridge,
         scan_bridge,
         dynamic_obstacle_mover,
+        odom_slip_simulator,
         software_lidar,
     ])

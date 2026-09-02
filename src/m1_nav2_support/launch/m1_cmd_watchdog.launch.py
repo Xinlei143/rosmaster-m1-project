@@ -15,7 +15,7 @@ def generate_launch_description():
     arguments = [
         DeclareLaunchArgument("input_topic", default_value="/m1/cmd_vel_raw"),
         DeclareLaunchArgument("output_topic", default_value="/cmd_vel"),
-        DeclareLaunchArgument("watchdog_timeout", default_value="0.60",
+        DeclareLaunchArgument("watchdog_timeout", default_value="0.40",
                               description="Maximum raw-command age [s]."),
         DeclareLaunchArgument("publish_rate", default_value="20.0",
                               description="Forward/zero publication rate [Hz]."),
