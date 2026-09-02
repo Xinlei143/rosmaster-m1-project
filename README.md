@@ -15,18 +15,40 @@ Imperative 方法不会被 Nav2 默认启动文件自动启动。它使用独立
 ## 构建
 
 ```bash
-cd /home/lin24311/car_ws2/rosmaster-m1-project
+cd /home/xinlei/Data/ROS/rosmaster-m1-project
 source /opt/ros/humble/setup.bash
 
 sudo apt update
-sudo apt install ros-humble-navigation2 ros-humble-nav2-bringup \
-  ros-humble-nav2-mppi-controller ros-humble-ros-gz-sim
+sudo apt install -y \
+  python3-colcon-common-extensions python3-numpy python3-matplotlib python3-pytest \
+  ros-humble-navigation2 ros-humble-nav2-bringup ros-humble-nav2-mppi-controller \
+  ros-humble-ros-gz-sim ros-humble-ros-gz-bridge ros-humble-ros-gz-interfaces \
+  ros-humble-robot-state-publisher ros-humble-rviz2 ros-humble-xacro
 
-colcon build --packages-select \
+unset PYTHONPATH
+
+/usr/bin/colcon build --packages-select \
   yahboomcar_description m1_nav2_support m1_nav2_bringup imperative_navigation \
   --symlink-install
-source install/setup.bash
+source /home/xinlei/Data/ROS/rosmaster-m1-project/install/setup.bash
 ```
+
+## Python 与 PyTorch 运行环境
+
+ROS 2 Humble 的 `rclpy` 使用系统 Python 3.10；Imperative 的张量计算使用 `pendulum-rl` 环境中的
+PyTorch 和 NumPy。不要直接用 Python 3.12 的 Conda 环境加载 ROS 2 节点。
+
+```bash
+conda activate pendulum-rl
+source /opt/ros/humble/setup.bash
+source /home/xinlei/Data/ROS/rosmaster-m1-project/install/setup.bash
+export PYTHONPATH=/home/xinlei/Data/robotics_ws/miniconda3/envs/pendulum-rl/lib/python3.10/site-packages${PYTHONPATH:+:$PYTHONPATH}
+
+/usr/bin/python3 -c "import torch, numpy, rclpy; print('torch:', torch.__version__); print('numpy:', numpy.__version__); print('rclpy: ok')"
+```
+
+构建使用 `/usr/bin/colcon`，运行 ROS 节点使用 `/usr/bin/python3`；仅通过 `PYTHONPATH` 引入
+`pendulum-rl` 的 `torch`，这样不会把系统 `rclpy` 与 Conda 的 Python 版本混用。
 
 ## Gazebo 与 RViz MPPI 仿真
 
