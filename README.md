@@ -1,16 +1,16 @@
-# Rosmaster M1 Nav2 MPPI 与 Imperative 避障
+# Rosmaster M1 Imperative 避障
 
-当前默认入口仍是 ROS 2 Humble 的 Nav2 MPPI 避障仿真与实机 bringup；`imperative` 分支另外恢复了
-旧版 Imperative 局部规划器，作为并行、可独立启动的实验方法。
+`imperative` 分支以 Imperative 局部避障算法为主。默认仿真入口为
+`imperative_navigation` 包的独立启动文件；算法使用 LaserScan 相邻回波聚类、`[x, y, vx, vy]`
+常速度 Kalman 跟踪与 20 步滚动时域候选轨迹，动态障碍物未来位置采用常速度外推，而非学习模型。
 
-- 全局规划：`nav2_navfn_planner`；
-- 局部避障控制：`nav2_mppi_controller::MPPIController`；
-- 底盘：M1 麦克纳姆轮，MPPI 使用 `Omni` 并保留 `linear.x`、`linear.y` 与 `angular.z`；
-- 障碍输入：`/scan` 进入 Nav2 的全局/局部 Costmap；
-- 安全链：MPPI → Velocity Smoother → Collision Monitor → watchdog → `/cmd_vel`。
+- 底盘：M1 麦克纳姆轮，控制输出包含 `linear.x`、`linear.y` 与 `angular.z`；
+- 障碍输入：`/scan`；
+- 仿真控制输出：Gazebo 直接使用 `/cmd_vel`；
+- 可视化与算法细节：[`docs/imperative_navigation.md`](docs/imperative_navigation.md)。
 
-Imperative 方法不会被 Nav2 默认启动文件自动启动。它使用独立的 `imperative_navigation` 包和启动
-文件，同一时刻不要与 Nav2 Gazebo 控制器一起运行。
+仓库保留 Nav2 MPPI 启动文件作为对照基线，但它不是本分支的默认方法。同一时刻只能启动
+Imperative 或 Nav2 Gazebo 控制器之一，不能同时运行。
 
 ## 构建
 
@@ -50,35 +50,32 @@ export PYTHONPATH=/home/xinlei/Data/robotics_ws/miniconda3/envs/pendulum-rl/lib/
 构建使用 `/usr/bin/colcon`，运行 ROS 节点使用 `/usr/bin/python3`；仅通过 `PYTHONPATH` 引入
 `pendulum-rl` 的 `torch`，这样不会把系统 `rclpy` 与 Conda 的 Python 版本混用。
 
-## Gazebo 与 RViz MPPI 仿真
+## Imperative Gazebo 与 RViz 仿真
+
+```bash
+ros2 launch imperative_navigation imperative_m1_gazebo.launch.py \
+  gui:=true rviz:=true dynamic_obstacles:=true software_lidar:=false
+```
+
+Gazebo 启动后，在 RViz 选择 **2D Goal Pose** 设置目标点。Imperative 控制器依据实时 `/scan`
+跟踪动态障碍物并生成局部候选轨迹；缺少有效传感器、里程计或 TF 数据时会保持安全零指令。
+
+## Nav2 MPPI 对照基线
+
+如需运行保留的 Nav2 MPPI 基线，可使用以下 Gazebo 入口：
 
 ```bash
 ros2 launch m1_nav2_bringup nav2_m1_gazebo.launch.py \
   gui:=true rviz:=true dynamic_obstacles:=true software_lidar:=false
 ```
 
-Gazebo 启动后，在 RViz 选择 **2D Goal Pose** 设置目标点。MPPI 会依据实时 `/scan` 更新的 Costmap 进行静态和反应式动态避障；若无安全可行轨迹，安全行为是减速或停车。
-
-## 实机 MPPI 启动
-
-底盘驱动必须提供 `/scan`、`/odom` 与 `odom → base_footprint` TF：
+实机 Nav2 基线要求底盘驱动提供 `/scan`、`/odom` 与 `odom → base_footprint` TF：
 
 ```bash
 ros2 launch m1_nav2_bringup nav2_m1_real.launch.py rviz:=true
 ```
 
-## Imperative 并行方法
-
-Imperative 使用 LaserScan 相邻回波聚类、`[x, y, vx, vy]` 常速度 Kalman 跟踪和 20 步滚动时域候选
-轨迹。动态障碍物未来位置采用常速度外推，不是学习模型。完整算法说明见
-[`docs/imperative_navigation.md`](docs/imperative_navigation.md)。
-
-Gazebo 仿真只启动当前仓库的 Gazebo、软件雷达和动态障碍物适配器，再启动 Imperative 控制器：
-
-```bash
-ros2 launch imperative_navigation imperative_m1_gazebo.launch.py \
-  gui:=true rviz:=true dynamic_obstacles:=true software_lidar:=false
-```
+## Imperative 实机入口
 
 实机入口默认是干运行，只有显式设置 `enabled:=true` 才会输出物理原始指令；watchdog 应在独立终端
 运行：
