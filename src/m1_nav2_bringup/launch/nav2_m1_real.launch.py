@@ -198,7 +198,7 @@ def generate_launch_description():
             "use_sim_time": use_sim_time,
             "input_topic": "/m1/cmd_vel_raw",
             "output_topic": "/cmd_vel",
-            "watchdog_timeout": 0.50,
+            "watchdog_timeout": 0.40,
             "publish_rate": 20.0,
         }],
     )

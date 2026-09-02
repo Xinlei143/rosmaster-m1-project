@@ -63,12 +63,22 @@ def test_gazebo_scan_bridge_isolated_from_core_bridge_topics():
 
     for route in (
         "/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
-        "/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry",
-        "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
-        "/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V",
+        "/ground_truth/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry",
+        "/world/m1/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
+        "/ground_truth/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V",
     ):
         assert route in core_arguments
     assert not any(argument.startswith("/scan@") for argument in core_arguments)
     assert scan_arguments == [
         "/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
     ]
+
+
+def test_gazebo_bridges_namespaced_world_clock_to_ros_clock():
+    source = BRIDGE_LAUNCH.read_text()
+    bridges = _parameter_bridge_arguments()
+
+    assert "/world/m1/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock" in bridges[
+        "m1_gazebo_bridge_core"
+    ]
+    assert '("/world/m1/clock", "/clock")' in source

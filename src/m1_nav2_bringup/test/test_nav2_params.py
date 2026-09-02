@@ -74,6 +74,51 @@ def test_gpu_lidar_scan_marks_and_clears_both_costmaps():
         assert scan["clearing"] is True
 
 
+def test_costmap_observation_buffers_are_freshness_gated():
+    for costmap_name in ("local_costmap", "global_costmap"):
+        scan = costmap_scan_source(costmap_name)
+        assert scan["observation_persistence"] == 0.0
+        assert 0.0 < scan["expected_update_rate"] <= 0.30
+        assert scan["inf_is_valid"] is False
+
+
+def test_local_costmap_publishes_complete_diagnostic_snapshots_at_lower_rate():
+    parameters = costmap_parameters("local_costmap")
+
+    assert parameters["update_frequency"] == 10.0
+    assert parameters["publish_frequency"] == 5.0
+    assert parameters["always_send_full_costmap"] is True
+
+
+def test_safety_timeout_hierarchy_is_ordered_after_observation_timeout():
+    local_scan = costmap_scan_source("local_costmap")
+    smoother = velocity_smoother_parameters()
+    collision = collision_monitor_parameters()
+
+    assert local_scan["expected_update_rate"] < collision["source_timeout"]
+    assert collision["source_timeout"] <= smoother["velocity_timeout"]
+    assert smoother["velocity_timeout"] <= 0.40
+
+
+def test_gazebo_launch_waits_for_localization_before_navigation_lifecycle():
+    launch_source = GAZEBO_LAUNCH.read_text()
+
+    assert '"navigation_start_delay"' in launch_source
+    assert 'default_value="35.0"' in launch_source
+    assert 'period=LaunchConfiguration("navigation_start_delay")' in launch_source
+    assert 'actions=[navigation_lifecycle]' in launch_source
+
+
+def test_scan_dropout_gate_is_opt_in_and_only_applies_to_software_lidar():
+    launch_source = GAZEBO_LAUNCH.read_text()
+
+    assert '"scan_dropout_start"' in launch_source
+    assert 'default_value="-1.0"' in launch_source
+    assert '"scan_dropout_duration"' in launch_source
+    assert 'default_value="0.0"' in launch_source
+    assert 'condition=IfCondition(LaunchConfiguration("software_lidar"))' in launch_source
+
+
 def test_local_costmap_has_a_dynamic_obstacle_lookahead_window():
     parameters = costmap_parameters("local_costmap")
     scan = parameters["obstacle_layer"]["scan"]
@@ -84,7 +129,7 @@ def test_local_costmap_has_a_dynamic_obstacle_lookahead_window():
     assert scan["obstacle_max_range"] == 4.0
     assert scan["raytrace_max_range"] == 4.5
     assert parameters["inflation_layer"]["inflation_radius"] == 0.4
-    assert parameters["always_send_full_costmap"] is False
+    assert parameters["always_send_full_costmap"] is True
 
 
 def test_mppi_uses_supported_omni_velocity_constraints():

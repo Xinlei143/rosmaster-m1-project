@@ -207,7 +207,10 @@ local_costmap:
       global_frame: odom
       robot_base_frame: base_footprint
       update_frequency: 10.0
-      publish_frequency: 10.0
+      # Keep the internal map loop at 10 Hz while publishing complete
+      # diagnostic/RViz snapshots at a lower, bounded rate.
+      publish_frequency: 5.0
+      transform_tolerance: 0.3
       rolling_window: true
       # Give the rolling local map enough look-ahead for the GPU LiDAR while
       # keeping it substantially smaller than the global map.
@@ -236,12 +239,17 @@ local_costmap:
           obstacle_min_range: 0.05
           raytrace_max_range: 4.5
           raytrace_min_range: 0.05
+          observation_persistence: 0.0
+          expected_update_rate: 0.25
+          # Keep the default strict: GPU scans are finite in the measured
+          # bridge path, so +Inf-as-clearing is not enabled without evidence.
+          inf_is_valid: false
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         cost_scaling_factor: 3.0
         # Keep a small cost buffer around observed obstacles.
         inflation_radius: 0.4
-      always_send_full_costmap: false
+      always_send_full_costmap: true
 
 global_costmap:
   global_costmap:
@@ -251,6 +259,7 @@ global_costmap:
       robot_base_frame: base_footprint
       update_frequency: 2.0
       publish_frequency: 1.0
+      transform_tolerance: 0.3
       resolution: 0.05
       track_unknown_space: true
       footprint: "[[-0.15,-0.12],[-0.15,0.12],[0.15,0.12],[0.15,-0.12]]"
@@ -274,6 +283,9 @@ global_costmap:
           obstacle_min_range: 0.05
           raytrace_max_range: 3.0
           raytrace_min_range: 0.05
+          observation_persistence: 0.0
+          expected_update_rate: 0.25
+          inf_is_valid: false
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         cost_scaling_factor: 3.0
@@ -360,7 +372,7 @@ velocity_smoother:
     odom_topic: /odom
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]
-    velocity_timeout: 1.0
+    velocity_timeout: 0.35
 
 collision_monitor:
   ros__parameters:
@@ -370,7 +382,7 @@ collision_monitor:
     cmd_vel_in_topic: /cmd_vel_smoothed
     cmd_vel_out_topic: /m1/cmd_vel_raw
     transform_tolerance: 0.5
-    source_timeout: 0.5
+    source_timeout: 0.30
     base_shift_correction: true
     # Do not keep publishing a prior emergency stop after the scan is clear.
     stop_pub_timeout: 0.25

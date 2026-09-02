@@ -71,6 +71,10 @@ def generate_launch_description():
         executable="scan_relay",
         name="m1_scan_relay",
         condition=IfCondition(LaunchConfiguration("software_lidar")),
+        parameters=[{
+            "dropout_start_seconds": LaunchConfiguration("scan_dropout_start"),
+            "dropout_duration_seconds": LaunchConfiguration("scan_dropout_duration"),
+        }],
         output="screen",
     )
 
@@ -201,7 +205,7 @@ def generate_launch_description():
             "use_sim_time": use_sim_time,
             "input_topic": "/m1/cmd_vel_raw",
             "output_topic": "/cmd_vel",
-            "watchdog_timeout": 0.50,
+            "watchdog_timeout": 0.40,
             "publish_rate": 20.0,
         }],
     )
@@ -223,6 +227,24 @@ def generate_launch_description():
             description=(
                 "Delay RViz until Gazebo, localization, Nav2, and the "
                 "safety lifecycle nodes have had time to become active.")),
+        DeclareLaunchArgument(
+            "navigation_start_delay",
+            default_value="35.0",
+            description=(
+                "Wait for Gazebo odom and AMCL map->odom TF before configuring "
+                "the global/local costmaps.")),
+        DeclareLaunchArgument(
+            "scan_dropout_start",
+            default_value="-1.0",
+            description=(
+                "Diagnostic-only software-lidar relay dropout start in seconds "
+                "after relay startup; negative disables it.")),
+        DeclareLaunchArgument(
+            "scan_dropout_duration",
+            default_value="0.0",
+            description=(
+                "Diagnostic-only software-lidar relay dropout duration in "
+                "seconds; zero disables it.")),
         DeclareLaunchArgument(
             "software_lidar", default_value="false",
             description="Use deterministic software LaserScan for Gazebo Sim 6 / WSLg."),
@@ -252,7 +274,9 @@ def generate_launch_description():
         velocity_smoother,
         # Gazebo needs time to spawn M1 and start /odom plus odom->base TF.
         # Starting controller_server earlier leaves the local controller inactive.
-        TimerAction(period=20.0, actions=[navigation_lifecycle]),
+        TimerAction(
+            period=LaunchConfiguration("navigation_start_delay"),
+            actions=[navigation_lifecycle]),
         collision_monitor,
         TimerAction(period=24.0, actions=[safety_lifecycle]),
         watchdog,
