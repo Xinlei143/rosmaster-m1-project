@@ -11,6 +11,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.descriptions import ParameterFile
+from launch_ros.parameter_descriptions import ParameterValue
 from nav2_common.launch import RewrittenYaml
 
 
@@ -72,8 +73,15 @@ def generate_launch_description():
         name="m1_scan_relay",
         condition=IfCondition(LaunchConfiguration("software_lidar")),
         parameters=[{
-            "dropout_start_seconds": LaunchConfiguration("scan_dropout_start"),
-            "dropout_duration_seconds": LaunchConfiguration("scan_dropout_duration"),
+            # Launch CLI values such as ``scan_dropout_start:=5`` are parsed
+            # as integers unless the parameter type is constrained here.
+            # ScanRelay declares both values as doubles, so keep the
+            # diagnostic gate robust to either integer- or decimal-looking
+            # launch arguments.
+            "dropout_start_seconds": ParameterValue(
+                LaunchConfiguration("scan_dropout_start"), value_type=float),
+            "dropout_duration_seconds": ParameterValue(
+                LaunchConfiguration("scan_dropout_duration"), value_type=float),
         }],
         output="screen",
     )
