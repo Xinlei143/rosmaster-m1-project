@@ -13,6 +13,7 @@ setup(
         ("share/" + package_name, ["package.xml"]),
         ("share/" + package_name + "/launch", glob("launch/*.launch.py")),
         ("share/" + package_name + "/worlds", glob("worlds/*.sdf")),
+        ("share/" + package_name + "/rviz", glob("rviz/*.rviz")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -28,6 +29,8 @@ setup(
             "odom_slip_simulator = m1_nav2_support.odom_slip_simulator:main",
             "m1_motion_diagnostic = m1_nav2_support.motion_diagnostic:main",
             "m1_costmap_freshness_diagnostic = m1_nav2_support.costmap_freshness_diagnostic:main",
+            "gpu_lidar_probe = m1_nav2_support.gpu_lidar_probe:main",
+            "gpu_lidar_readback_ab = m1_nav2_support.gpu_lidar_readback_ab:main",
         ],
     },
 )

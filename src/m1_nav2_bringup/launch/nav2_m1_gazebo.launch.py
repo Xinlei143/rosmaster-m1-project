@@ -61,6 +61,9 @@ def generate_launch_description():
                     "rviz": "false",
                     "software_lidar": LaunchConfiguration("software_lidar"),
                     "dynamic_obstacles": LaunchConfiguration("dynamic_obstacles"),
+                    "render_engine": LaunchConfiguration("render_engine"),
+                    "gpu_lidar_min_angle": LaunchConfiguration("gpu_lidar_min_angle"),
+                    "gpu_lidar_max_angle": LaunchConfiguration("gpu_lidar_max_angle"),
                 }.items(),
             ),
         ],
@@ -248,6 +251,15 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "software_lidar", default_value="false",
             description="Use deterministic software LaserScan for Gazebo Sim 6 / WSLg."),
+        DeclareLaunchArgument(
+            "render_engine", default_value="ogre2",
+            description="Gazebo rendering engine used by GPU LiDAR backend A/B tests."),
+        DeclareLaunchArgument(
+            "gpu_lidar_min_angle", default_value="-3.14159265359",
+            description="GPU LiDAR horizontal minimum angle in radians."),
+        DeclareLaunchArgument(
+            "gpu_lidar_max_angle", default_value="3.14159265359",
+            description="GPU LiDAR horizontal maximum angle in radians."),
         DeclareLaunchArgument(
             "dynamic_obstacles", default_value="true",
             description="Enable moving obstacles for navigation tests."),

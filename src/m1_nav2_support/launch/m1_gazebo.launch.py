@@ -23,11 +23,12 @@ def launch_gazebo(context):
     ros_gz_sim_share = get_package_share_directory("ros_gz_sim")
     world = os.path.join(package_share, "worlds", "m1.sdf")
     server_only = "-s " if LaunchConfiguration("gui").perform(context).lower() == "false" else ""
+    render_engine = LaunchConfiguration("render_engine").perform(context)
 
     return [IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(ros_gz_sim_share, "launch", "gz_sim.launch.py")),
         # OGRE2 is required for the GPU LiDAR's full 360-degree field of view.
-        launch_arguments={"gz_args": f"{server_only}-r -v 4 --render-engine ogre2 {world}"}.items(),
+        launch_arguments={"gz_args": f"{server_only}-r -v 4 --render-engine {render_engine} {world}"}.items(),
     )]
 
 
@@ -45,6 +46,8 @@ def generate_launch_description():
         PythonExpression([
             "'false' if '", LaunchConfiguration("software_lidar"),
             "' == 'true' else 'true'"]),
+        " gpu_lidar_min_angle:=", LaunchConfiguration("gpu_lidar_min_angle"),
+        " gpu_lidar_max_angle:=", LaunchConfiguration("gpu_lidar_max_angle"),
     ])
     robot_description = ParameterValue(robot_description_xml, value_type=str)
 
@@ -172,6 +175,15 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("rviz", default_value="false", description="Unused adapter compatibility argument."),
         DeclareLaunchArgument("gui", default_value="true", description="Open the Gazebo GUI."),
+        DeclareLaunchArgument(
+            "render_engine", default_value="ogre2",
+            description="Gazebo rendering engine used by GPU LiDAR A/B tests."),
+        DeclareLaunchArgument(
+            "gpu_lidar_min_angle", default_value="-3.14159265359",
+            description="GPU LiDAR horizontal minimum angle in radians."),
+        DeclareLaunchArgument(
+            "gpu_lidar_max_angle", default_value="3.14159265359",
+            description="GPU LiDAR horizontal maximum angle in radians."),
         DeclareLaunchArgument(
             "software_lidar", default_value="false",
             description=(

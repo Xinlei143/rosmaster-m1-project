@@ -29,18 +29,31 @@ def test_percentile_and_interval_summary_include_p50_p95_and_max():
 
 def test_scan_range_stats_separate_finite_positive_inf_and_nan():
     stats = DIAGNOSTIC.scan_range_stats(
-        [0.4, float("inf"), float("nan"), 2.0], 12.0)
+        [0.4, float("inf"), float("-inf"), float("nan"), 2.0], 12.0)
 
     assert stats == {
         "finite_count": 2,
         "positive_inf_count": 1,
+        "negative_inf_count": 1,
         "nan_count": 1,
-        "finite_ratio": pytest.approx(0.5),
-        "positive_inf_ratio": pytest.approx(0.25),
-        "nan_ratio": pytest.approx(0.25),
+        "finite_ratio": pytest.approx(0.4),
+        "positive_inf_ratio": pytest.approx(0.2),
+        "negative_inf_ratio": pytest.approx(0.2),
+        "nan_ratio": pytest.approx(0.2),
         "min_finite_range": pytest.approx(0.4),
         "range_max": pytest.approx(12.0),
     }
+
+
+def test_scan_range_stats_accepts_json_non_finite_tokens_as_strings():
+    stats = DIAGNOSTIC.scan_range_stats(
+        ["-Infinity", "Infinity", "NaN", "1.25"], 12.0)
+
+    assert stats["finite_count"] == 1
+    assert stats["negative_inf_count"] == 1
+    assert stats["positive_inf_count"] == 1
+    assert stats["nan_count"] == 1
+    assert stats["min_finite_range"] == pytest.approx(1.25)
 
 
 def test_header_age_uses_exact_stamp_and_preserves_negative_clock_skew():

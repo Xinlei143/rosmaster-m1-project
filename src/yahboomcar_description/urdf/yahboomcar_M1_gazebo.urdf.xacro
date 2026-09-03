@@ -6,6 +6,8 @@
        xmlns:xacro="http://ros.org/wiki/xacro"
        xmlns:ignition="http://ignitionrobotics.org/schema">
   <xacro:arg name="enable_gpu_lidar" default="true"/>
+  <xacro:arg name="gpu_lidar_min_angle" default="-3.14159265359"/>
+  <xacro:arg name="gpu_lidar_max_angle" default="3.14159265359"/>
   <xacro:arg name="enable_contact_sensors" default="false"/>
   <xacro:arg name="enable_force_torque_sensors" default="false"/>
   <link name="imu_link"/>
@@ -545,8 +547,8 @@
             <horizontal>
               <samples>667</samples>
               <resolution>1</resolution>
-              <min_angle>-3.14159265359</min_angle>
-              <max_angle>3.14159265359</max_angle>
+              <min_angle>$(arg gpu_lidar_min_angle)</min_angle>
+              <max_angle>$(arg gpu_lidar_max_angle)</max_angle>
             </horizontal>
             <vertical>
               <samples>1</samples>

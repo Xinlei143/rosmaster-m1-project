@@ -51,19 +51,36 @@ def summarize_intervals(values):
 
 def scan_range_stats(ranges, range_max):
     """Classify LaserScan ranges without treating NaN as clear space."""
-    values = list(ranges)
-    finite = [float(value) for value in values if math.isfinite(value)]
+    values = []
+    for value in ranges:
+        if isinstance(value, str):
+            token = value.strip().lower()
+            value = {
+                "infinity": float("inf"),
+                "+infinity": float("inf"),
+                "inf": float("inf"),
+                "+inf": float("inf"),
+                "-infinity": float("-inf"),
+                "-inf": float("-inf"),
+                "nan": float("nan"),
+            }.get(token, value)
+        values.append(float(value))
+    finite = [value for value in values if math.isfinite(value)]
     positive_inf = sum(
         1 for value in values if math.isinf(value) and value > 0.0)
+    negative_inf = sum(
+        1 for value in values if math.isinf(value) and value < 0.0)
     nan = sum(1 for value in values if math.isnan(value))
     total = len(values)
     denominator = float(total) if total else 1.0
     return {
         "finite_count": len(finite),
         "positive_inf_count": positive_inf,
+        "negative_inf_count": negative_inf,
         "nan_count": nan,
         "finite_ratio": len(finite) / denominator,
         "positive_inf_ratio": positive_inf / denominator,
+        "negative_inf_ratio": negative_inf / denominator,
         "nan_ratio": nan / denominator,
         "min_finite_range": min(finite) if finite else None,
         "range_max": float(range_max),
@@ -426,6 +443,9 @@ class CostmapFreshnessDiagnostic(Node):
         positive_inf_ratio = statistics.fmean(
             sample["positive_inf_ratio"] for sample in self.scan_stats
         ) if self.scan_stats else None
+        negative_inf_ratio = statistics.fmean(
+            sample["negative_inf_ratio"] for sample in self.scan_stats
+        ) if self.scan_stats else None
         nan_ratio = statistics.fmean(
             sample["nan_ratio"] for sample in self.scan_stats
         ) if self.scan_stats else None
@@ -454,6 +474,7 @@ class CostmapFreshnessDiagnostic(Node):
                 if self.scan_header_ages else None),
             "finite_ratio_mean": finite_ratio,
             "positive_inf_ratio_mean": positive_inf_ratio,
+            "negative_inf_ratio_mean": negative_inf_ratio,
             "nan_ratio_mean": nan_ratio,
             "min_finite_range_mean": (
                 statistics.fmean(min_ranges) if min_ranges else None),

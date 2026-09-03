@@ -207,9 +207,10 @@ local_costmap:
       global_frame: odom
       robot_base_frame: base_footprint
       update_frequency: 10.0
-      # Keep the internal map loop at 10 Hz while publishing complete
-      # diagnostic/RViz snapshots at a lower, bounded rate.
-      publish_frequency: 5.0
+      # Keep the internal map loop at 10 Hz while requesting complete
+      # diagnostic/RViz snapshots at 20 Hz. The effective rate is bounded by
+      # the map-update loop and is measured in the runtime experiment.
+      publish_frequency: 20.0
       transform_tolerance: 0.3
       rolling_window: true
       # Give the rolling local map enough look-ahead for the GPU LiDAR while

@@ -82,3 +82,25 @@ def test_gazebo_bridges_namespaced_world_clock_to_ros_clock():
         "m1_gazebo_bridge_core"
     ]
     assert '("/world/m1/clock", "/clock")' in source
+
+
+def test_gazebo_render_engine_is_explicit_and_defaults_to_ogre2():
+    source = BRIDGE_LAUNCH.read_text()
+
+    assert 'LaunchConfiguration("render_engine")' in source
+    assert '"render_engine", default_value="ogre2"' in source
+
+
+def test_gpu_lidar_horizontal_fov_is_configurable_with_a_360_degree_default():
+    """The cubemap experiment must change only the real GPU LiDAR FOV."""
+    text = URDF.read_text()
+    source = BRIDGE_LAUNCH.read_text()
+
+    assert '<xacro:arg name="gpu_lidar_min_angle" default="-3.14159265359"/>' in text
+    assert '<xacro:arg name="gpu_lidar_max_angle" default="3.14159265359"/>' in text
+    assert '<min_angle>$(arg gpu_lidar_min_angle)</min_angle>' in text
+    assert '<max_angle>$(arg gpu_lidar_max_angle)</max_angle>' in text
+    assert '" gpu_lidar_min_angle:=", LaunchConfiguration("gpu_lidar_min_angle")' in source
+    assert '" gpu_lidar_max_angle:=", LaunchConfiguration("gpu_lidar_max_angle")' in source
+    assert '"gpu_lidar_min_angle", default_value="-3.14159265359"' in source
+    assert '"gpu_lidar_max_angle", default_value="3.14159265359"' in source
