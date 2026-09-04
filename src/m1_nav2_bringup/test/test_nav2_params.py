@@ -135,6 +135,8 @@ def test_scan_dropout_gate_is_opt_in_and_only_applies_to_software_lidar():
     assert '"scan_dropout_duration"' in launch_source
     assert 'default_value="0.0"' in launch_source
     assert 'condition=IfCondition(LaunchConfiguration("software_lidar"))' in launch_source
+    assert 'ParameterValue(' in launch_source
+    assert 'value_type=float' in launch_source
 
 
 def test_local_costmap_has_a_dynamic_obstacle_lookahead_window():
