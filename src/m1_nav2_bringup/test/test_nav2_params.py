@@ -66,6 +66,24 @@ def test_nav2_gazebo_defaults_to_native_gpu_lidar():
     assert '"software_lidar", default_value="false"' in launch_source
 
 
+def test_nav2_gazebo_exposes_the_support_render_engine_for_backend_ab():
+    launch_source = GAZEBO_LAUNCH.read_text()
+
+    assert '"render_engine": LaunchConfiguration("render_engine")' in launch_source
+    assert '"render_engine", default_value="ogre"' in launch_source
+    assert '"dual_gpu_lidar": LaunchConfiguration("dual_gpu_lidar")' in launch_source
+    assert '"dual_gpu_lidar", default_value="true"' in launch_source
+
+
+def test_nav2_gazebo_forwards_gpu_lidar_fov_for_the_cubemap_ab():
+    launch_source = GAZEBO_LAUNCH.read_text()
+
+    assert '"gpu_lidar_min_angle": LaunchConfiguration("gpu_lidar_min_angle")' in launch_source
+    assert '"gpu_lidar_max_angle": LaunchConfiguration("gpu_lidar_max_angle")' in launch_source
+    assert '"gpu_lidar_min_angle", default_value="-3.14159265359"' in launch_source
+    assert '"gpu_lidar_max_angle", default_value="3.14159265359"' in launch_source
+
+
 def test_gpu_lidar_scan_marks_and_clears_both_costmaps():
     for costmap_name in ("local_costmap", "global_costmap"):
         scan = costmap_scan_source(costmap_name)
@@ -82,11 +100,11 @@ def test_costmap_observation_buffers_are_freshness_gated():
         assert scan["inf_is_valid"] is False
 
 
-def test_local_costmap_publishes_complete_diagnostic_snapshots_at_lower_rate():
+def test_local_costmap_requests_complete_diagnostic_snapshots_at_20_hz():
     parameters = costmap_parameters("local_costmap")
 
     assert parameters["update_frequency"] == 10.0
-    assert parameters["publish_frequency"] == 5.0
+    assert parameters["publish_frequency"] == 20.0
     assert parameters["always_send_full_costmap"] is True
 
 

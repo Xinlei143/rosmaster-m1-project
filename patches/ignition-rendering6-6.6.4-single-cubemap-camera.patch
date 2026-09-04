@@ -1,0 +1,185 @@
+diff --git a/ogre2/src/Ogre2GpuRays.cc b/ogre2/src/Ogre2GpuRays.cc
+index cfa06bd..6b47a89 100644
+--- a/ogre2/src/Ogre2GpuRays.cc
++++ b/ogre2/src/Ogre2GpuRays.cc
+@@ -133,8 +133,8 @@ class gz::rendering::Ogre2GpuRaysPrivate
+   /// \brief Pointer to Ogre material for the second rendering pass.
+   public: Ogre::MaterialPtr matSecondPass;
+ 
+-  /// \brief Cubemap cameras
+-  public: Ogre::Camera *cubeCam[6];
++  /// \brief Cubemap camera
++  public: Ogre::Camera *cubeCam{nullptr};
+ 
+   /// \brief Texture packed with cubemap face and uv data
+   public: Ogre::TextureGpu *cubeUVTexture = nullptr;
+@@ -187,14 +187,14 @@ class gz::rendering::Ogre2GpuRaysPrivate
+ 
+   /// \brief Pointer to material switcher
+   public: std::unique_ptr<Ogre2LaserRetroMaterialSwitcher>
+-      laserRetroMaterialSwitcher[6];
++      laserRetroMaterialSwitcher;
+ 
+   /// \brief standard deviation of particle noise
+   public: double particleStddev = 0.01;
+ 
+   /// \brief Listener for setting particle noise value based on particle
+   /// emitter region
+-  public: std::unique_ptr<Ogre2ParticleNoiseListener> particleNoiseListener[6];
++  public: std::unique_ptr<Ogre2ParticleNoiseListener> particleNoiseListener;
+ 
+   /// \brief Near clip plane for cube camera
+   public: float nearClipCube = 0.0;
+@@ -378,9 +378,7 @@ Ogre2GpuRays::Ogre2GpuRays()
+ 
+   for (unsigned int i = 0; i < this->dataPtr->kCubeCameraCount; ++i)
+   {
+-    this->dataPtr->cubeCam[i] = nullptr;
+     this->dataPtr->ogreCompositorWorkspace1st[i] = nullptr;
+-    this->dataPtr->laserRetroMaterialSwitcher[i] = nullptr;
+   }
+ }
+ 
+@@ -500,18 +498,17 @@ void Ogre2GpuRays::Destroy()
+     }
+     else
+     {
+-      for (unsigned int i = 0u; i < this->dataPtr->kCubeCameraCount; ++i)
++      if (this->dataPtr->cubeCam)
+       {
+-        if (this->dataPtr->cubeCam[i])
+-        {
+-          this->dataPtr->cubeCam[i]->removeListener(
+-              this->dataPtr->particleNoiseListener[i].get());
+-          ogreSceneManager->destroyCamera(this->dataPtr->cubeCam[i]);
+-          this->dataPtr->cubeCam[i] = nullptr;
+-        }
+-        this->dataPtr->particleNoiseListener[i].reset();
+-        this->dataPtr->laserRetroMaterialSwitcher[i].reset();
++        this->dataPtr->cubeCam->removeListener(
++            this->dataPtr->particleNoiseListener.get());
++        this->dataPtr->cubeCam->removeListener(
++            this->dataPtr->laserRetroMaterialSwitcher.get());
++        ogreSceneManager->destroyCamera(this->dataPtr->cubeCam);
++        this->dataPtr->cubeCam = nullptr;
+       }
++      this->dataPtr->particleNoiseListener.reset();
++      this->dataPtr->laserRetroMaterialSwitcher.reset();
+       ogreSceneManager->destroyCamera(this->dataPtr->ogreCamera);
+       this->dataPtr->ogreCamera = nullptr;
+     }
+@@ -1044,34 +1041,20 @@ void Ogre2GpuRays::Setup1stPass()
+            << " for " << this->Name();
+   }
+ 
+-  // create cubemap cameras and render to texture using 1st pass compositor
++  // create cubemap camera and render to texture using 1st pass compositor
+   Ogre::SceneManager *ogreSceneManager = this->scene->OgreSceneManager();
++  this->dataPtr->cubeCam = ogreSceneManager->createCamera(
++      this->Name() + "_env");
++  this->dataPtr->cubeCam->detachFromParent();
++  this->ogreNode->attachObject(this->dataPtr->cubeCam);
++  this->dataPtr->cubeCam->setFOVy(Ogre::Degree(90));
++  this->dataPtr->cubeCam->setAspectRatio(1);
++  this->dataPtr->cubeCam->setNearClipDistance(this->dataPtr->nearClipCube);
++  this->dataPtr->cubeCam->setFarClipDistance(this->FarClipPlane());
++  this->dataPtr->cubeCam->setFixedYawAxis(false);
++
+   for (auto i : this->dataPtr->cubeFaceIdx)
+   {
+-    this->dataPtr->cubeCam[i] = ogreSceneManager->createCamera(
+-        this->Name() + "_env" + std::to_string(i));
+-    this->dataPtr->cubeCam[i]->detachFromParent();
+-    this->ogreNode->attachObject(this->dataPtr->cubeCam[i]);
+-    this->dataPtr->cubeCam[i]->setFOVy(Ogre::Degree(90));
+-    this->dataPtr->cubeCam[i]->setAspectRatio(1);
+-    this->dataPtr->cubeCam[i]->setNearClipDistance(this->dataPtr->nearClipCube);
+-    this->dataPtr->cubeCam[i]->setFarClipDistance(this->FarClipPlane());
+-    this->dataPtr->cubeCam[i]->setFixedYawAxis(false);
+-    this->dataPtr->cubeCam[i]->yaw(Ogre::Degree(-90));
+-    this->dataPtr->cubeCam[i]->roll(Ogre::Degree(-90));
+-
+-    // orient camera to create cubemap
+-    if (i == 0)
+-      this->dataPtr->cubeCam[i]->yaw(Ogre::Degree(-90));
+-    else if (i == 1)
+-      this->dataPtr->cubeCam[i]->yaw(Ogre::Degree(90));
+-    else if (i == 2)
+-      this->dataPtr->cubeCam[i]->pitch(Ogre::Degree(90));
+-    else if (i == 3)
+-      this->dataPtr->cubeCam[i]->pitch(Ogre::Degree(-90));
+-    else if (i == 5)
+-      this->dataPtr->cubeCam[i]->yaw(Ogre::Degree(180));
+-
+     // create render texture - these textures pack the range data
+     // that will be used in the 2nd pass
+     Ogre::TextureGpuManager *textureMgr =
+@@ -1099,7 +1082,7 @@ void Ogre2GpuRays::Setup1stPass()
+         ogreCompMgr->addWorkspace(
+           this->scene->OgreSceneManager(),
+           this->dataPtr->firstPassTextures[i],
+-          this->dataPtr->cubeCam[i],
++          this->dataPtr->cubeCam,
+           wsDefName,
+           false, -1, 0, 0, 0, Ogre::Vector4::ZERO, 0x00,
+           this->dataPtr->kGpuRaysExecutionMask);
+@@ -1115,18 +1098,21 @@ void Ogre2GpuRays::Setup1stPass()
+         // add laser retro material switcher to render target listener
+         // so we can switch to use laser retro material when the camera is being
+         // updated
+-        this->dataPtr->laserRetroMaterialSwitcher[i].reset(
+-            new Ogre2LaserRetroMaterialSwitcher(this->scene));
+-        this->dataPtr->cubeCam[i]->addListener(
+-            this->dataPtr->laserRetroMaterialSwitcher[i].get());
+-
+-        // add particle noise / scatter effects listener so we can set the
+-        // amount of noise based on size of emitter
+-        this->dataPtr->particleNoiseListener[i].reset(
+-            new Ogre2ParticleNoiseListener(this->scene,
+-            this->dataPtr->matFirstPass));
+-        this->dataPtr->cubeCam[i]->addListener(
+-          this->dataPtr->particleNoiseListener[i].get());
++        if (!this->dataPtr->laserRetroMaterialSwitcher)
++        {
++          this->dataPtr->laserRetroMaterialSwitcher.reset(
++              new Ogre2LaserRetroMaterialSwitcher(this->scene));
++          this->dataPtr->cubeCam->addListener(
++              this->dataPtr->laserRetroMaterialSwitcher.get());
++
++          // add particle noise / scatter effects listener so we can set the
++          // amount of noise based on size of emitter
++          this->dataPtr->particleNoiseListener.reset(
++              new Ogre2ParticleNoiseListener(this->scene,
++              this->dataPtr->matFirstPass));
++          this->dataPtr->cubeCam->addListener(
++            this->dataPtr->particleNoiseListener.get());
++        }
+         break;
+       }
+     }
+@@ -1288,7 +1274,23 @@ void Ogre2GpuRays::UpdateRenderTarget1stPass()
+   // update the compositors
+   for (auto i : this->dataPtr->cubeFaceIdx)
+   {
+-    this->scene->UpdateAllHeightmaps(this->dataPtr->cubeCam[i]);
++    this->dataPtr->cubeCam->setOrientation(Ogre::Quaternion::IDENTITY);
++    this->dataPtr->cubeCam->yaw(Ogre::Degree(-90));
++    this->dataPtr->cubeCam->roll(Ogre::Degree(-90));
++
++    // orient camera to its corresponding cubemap face
++    if (i == 0)
++      this->dataPtr->cubeCam->yaw(Ogre::Degree(-90));
++    else if (i == 1)
++      this->dataPtr->cubeCam->yaw(Ogre::Degree(90));
++    else if (i == 2)
++      this->dataPtr->cubeCam->pitch(Ogre::Degree(90));
++    else if (i == 3)
++      this->dataPtr->cubeCam->pitch(Ogre::Degree(-90));
++    else if (i == 5)
++      this->dataPtr->cubeCam->yaw(Ogre::Degree(180));
++
++    this->scene->UpdateAllHeightmaps(this->dataPtr->cubeCam);
+     this->dataPtr->ogreCompositorWorkspace1st[i]->setEnabled(true);
+ 
+     this->dataPtr->ogreCompositorWorkspace1st[i]->_validateFinalTarget();
+

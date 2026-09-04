@@ -1,0 +1,62 @@
+<?xml version="1.0"?>
+<!-- The sensor-free counterpart of gpu_lidar_minimal_360.sdf for dynamic-spawn controls. -->
+<sdf version="1.9">
+  <world name="gpu_lidar_minimal_base">
+    <physics name="minimal_physics" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="ignition-gazebo-physics-system"
+            name="ignition::gazebo::systems::Physics"/>
+    <plugin filename="ignition-gazebo-user-commands-system"
+            name="ignition::gazebo::systems::UserCommands"/>
+    <plugin filename="ignition-gazebo-scene-broadcaster-system"
+            name="ignition::gazebo::systems::SceneBroadcaster"/>
+    <plugin filename="ignition-gazebo-sensors-system"
+            name="ignition::gazebo::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <light type="directional" name="sun">
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+    <model name="ground">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>12 12 0.1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>12 12 0.1</size></box></geometry></visual>
+      </link>
+    </model>
+    <model name="wall_north">
+      <static>true</static><pose>0 3.5 0.5 0 0 0</pose>
+      <link name="link"><collision name="collision"><geometry><box><size>8 0.1 1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>8 0.1 1</size></box></geometry></visual></link>
+    </model>
+    <model name="wall_south">
+      <static>true</static><pose>0 -3.5 0.5 0 0 0</pose>
+      <link name="link"><collision name="collision"><geometry><box><size>8 0.1 1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>8 0.1 1</size></box></geometry></visual></link>
+    </model>
+    <model name="wall_east">
+      <static>true</static><pose>4 0 0.5 0 0 0</pose>
+      <link name="link"><collision name="collision"><geometry><box><size>0.1 7 1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.1 7 1</size></box></geometry></visual></link>
+    </model>
+    <model name="wall_west">
+      <static>true</static><pose>-4 0 0.5 0 0 0</pose>
+      <link name="link"><collision name="collision"><geometry><box><size>0.1 7 1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.1 7 1</size></box></geometry></visual></link>
+    </model>
+    <model name="box_east">
+      <static>true</static><pose>2.0 1.5 0.45 0 0 0.2</pose>
+      <link name="link"><collision name="collision"><geometry><box><size>0.7 0.7 0.9</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.7 0.7 0.9</size></box></geometry></visual></link>
+    </model>
+    <model name="box_west">
+      <static>true</static><pose>-2.0 -1.4 0.45 0 0 -0.35</pose>
+      <link name="link"><collision name="collision"><geometry><box><size>0.8 0.5 0.9</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.8 0.5 0.9</size></box></geometry></visual></link>
+    </model>
+  </world>
+</sdf>

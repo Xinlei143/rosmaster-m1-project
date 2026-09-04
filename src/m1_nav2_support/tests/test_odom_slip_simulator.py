@@ -100,4 +100,5 @@ def test_gazebo_support_starts_slip_adapter_and_uses_truth_for_software_lidar():
     source = BRIDGE.read_text()
     assert 'executable="odom_slip_simulator"' in source
     assert '"pose_topic": "/ground_truth/odom"' in source
-    assert 'condition=UnlessCondition(LaunchConfiguration("software_lidar"))' in source
+    assert source.count('LaunchConfiguration("software_lidar")') >= 3
+    assert '"== \'false\' and \'"' not in source

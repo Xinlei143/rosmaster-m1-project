@@ -3,6 +3,9 @@ install/
 log/
 results
 scripts
+!scripts/
+scripts/*
+!scripts/run_gpu_lidar_single_camera_acceptance.py
 .vscode/
 __pycache__/
 *.pyc
