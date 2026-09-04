@@ -70,7 +70,9 @@ def test_nav2_gazebo_exposes_the_support_render_engine_for_backend_ab():
     launch_source = GAZEBO_LAUNCH.read_text()
 
     assert '"render_engine": LaunchConfiguration("render_engine")' in launch_source
-    assert '"render_engine", default_value="ogre2"' in launch_source
+    assert '"render_engine", default_value="ogre"' in launch_source
+    assert '"dual_gpu_lidar": LaunchConfiguration("dual_gpu_lidar")' in launch_source
+    assert '"dual_gpu_lidar", default_value="true"' in launch_source
 
 
 def test_nav2_gazebo_forwards_gpu_lidar_fov_for_the_cubemap_ab():

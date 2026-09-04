@@ -11,9 +11,10 @@ from launch.actions import (
     SetEnvironmentVariable,
     TimerAction,
 )
-from launch.conditions import IfCondition, UnlessCondition
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PythonExpression
+from launch.substitutions import (
+    Command, FindExecutable, LaunchConfiguration, PythonExpression)
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -21,19 +22,25 @@ from launch_ros.parameter_descriptions import ParameterValue
 def launch_gazebo(context):
     package_share = get_package_share_directory("m1_nav2_support")
     ros_gz_sim_share = get_package_share_directory("ros_gz_sim")
-    world = os.path.join(package_share, "worlds", "m1.sdf")
     server_only = "-s " if LaunchConfiguration("gui").perform(context).lower() == "false" else ""
     render_engine = LaunchConfiguration("render_engine").perform(context)
+    if render_engine not in {"ogre", "ogre2"}:
+        raise ValueError("render_engine must be 'ogre' or 'ogre2'")
+    world_name = "m1_ogre.sdf" if render_engine == "ogre" else "m1_ogre2_regression.sdf"
+    world = os.path.join(package_share, "worlds", world_name)
 
     return [IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(ros_gz_sim_share, "launch", "gz_sim.launch.py")),
+        PythonLaunchDescriptionSource(os.path.join(
+            ros_gz_sim_share, "launch", "gz_sim.launch.py")),
         # OGRE2 is required for the GPU LiDAR's full 360-degree field of view.
-        launch_arguments={"gz_args": f"{server_only}-r -v 4 --render-engine {render_engine} {world}"}.items(),
+        launch_arguments={
+            "gz_args": (
+                f"{server_only}-r -v 4 --render-engine "
+                f"{render_engine} {world}")}.items(),
     )]
 
 
 def generate_launch_description():
-    package_share = get_package_share_directory("m1_nav2_support")
     description_share = get_package_share_directory("yahboomcar_description")
     description_resource_root = os.path.dirname(description_share)
     model_file = os.path.join(
@@ -48,6 +55,7 @@ def generate_launch_description():
             "' == 'true' else 'true'"]),
         " gpu_lidar_min_angle:=", LaunchConfiguration("gpu_lidar_min_angle"),
         " gpu_lidar_max_angle:=", LaunchConfiguration("gpu_lidar_max_angle"),
+        " dual_gpu_lidar:=", LaunchConfiguration("dual_gpu_lidar"),
     ])
     robot_description = ParameterValue(robot_description_xml, value_type=str)
 
@@ -97,15 +105,62 @@ def generate_launch_description():
         ],
         output="screen",
     )
-    scan_bridge = Node(
+    single_scan_bridge = Node(
         package="ros_gz_bridge",
         executable="parameter_bridge",
         name="m1_gazebo_bridge_scan",
-        condition=UnlessCondition(LaunchConfiguration("software_lidar")),
+        condition=IfCondition(PythonExpression([
+            "'", LaunchConfiguration("software_lidar"), "' == 'false' and '",
+            LaunchConfiguration("dual_gpu_lidar"), "' == 'false'",
+        ])),
         arguments=[
             "/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
         ],
         output="screen",
+    )
+    dual_scan_bridge = Node(
+        package="ros_gz_bridge",
+        executable="parameter_bridge",
+        name="m1_gazebo_bridge_dual_scan",
+        condition=IfCondition(PythonExpression([
+            "'", LaunchConfiguration("software_lidar"), "' == 'false' and '",
+            LaunchConfiguration("dual_gpu_lidar"), "' == 'true'",
+        ])),
+        arguments=[
+            "/scan_front@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
+            "/scan_rear@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
+        ],
+        output="screen",
+    )
+    dual_laser_merger = Node(
+        package="dual_laser_merger",
+        executable="dual_laser_merger_node",
+        name="m1_dual_laser_merger",
+        condition=IfCondition(PythonExpression([
+            "'", LaunchConfiguration("software_lidar"), "' == 'false' and '",
+            LaunchConfiguration("dual_gpu_lidar"), "' == 'true'",
+        ])),
+        output="screen",
+        parameters=[{
+            "use_sim_time": True,
+            "laser_1_topic": "/scan_front",
+            "laser_2_topic": "/scan_rear",
+            "merged_scan_topic": "/scan",
+            "merged_cloud_topic": "/scan_merged_cloud",
+            "target_frame": "laser_scan_link",
+            "angle_min": -3.14159265359,
+            "angle_max": 3.14159265359,
+            "angle_increment": 0.009420067926806,
+            "scan_time": 0.083333333333333,
+            "range_min": 0.05,
+            "range_max": 12.0,
+            "min_height": -0.05,
+            "max_height": 0.05,
+            "use_inf": True,
+            "enable_calibration": False,
+            "enable_shadow_filter": False,
+            "enable_average_filter": False,
+        }],
     )
 
     dynamic_obstacle_mover = Node(
@@ -173,11 +228,16 @@ def generate_launch_description():
                os.environ.get("GZ_SIM_RESOURCE_PATH", "")]))
 
     return LaunchDescription([
-        DeclareLaunchArgument("rviz", default_value="false", description="Unused adapter compatibility argument."),
+        DeclareLaunchArgument(
+            "rviz", default_value="false",
+            description="Unused adapter compatibility argument."),
         DeclareLaunchArgument("gui", default_value="true", description="Open the Gazebo GUI."),
         DeclareLaunchArgument(
-            "render_engine", default_value="ogre2",
+            "render_engine", default_value="ogre",
             description="Gazebo rendering engine used by GPU LiDAR A/B tests."),
+        DeclareLaunchArgument(
+            "dual_gpu_lidar", default_value="true",
+            description="Use coincident front/rear 180-degree GPU LiDAR sensors."),
         DeclareLaunchArgument(
             "gpu_lidar_min_angle", default_value="-3.14159265359",
             description="GPU LiDAR horizontal minimum angle in radians."),
@@ -226,7 +286,9 @@ def generate_launch_description():
         robot_state_publisher,
         TimerAction(period=2.0, actions=[spawn_robot]),
         bridge,
-        scan_bridge,
+        single_scan_bridge,
+        dual_scan_bridge,
+        dual_laser_merger,
         dynamic_obstacle_mover,
         odom_slip_simulator,
         software_lidar,

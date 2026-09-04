@@ -230,7 +230,8 @@ local_costmap:
           data_type: LaserScan
           marking: true
           clearing: true
-          # The scan is measured in laser_Link (z=0 in that frame), but the
+          # The scan is measured in laser_scan_link (zero-offset from
+          # laser_Link), but the
           # obstacle observations are transformed into odom at about z=0.175 m.
           # Keep this source-level limit explicit so the inherited/default
           # value of 0.0 cannot discard every laser return.

@@ -31,6 +31,9 @@ setup(
             "m1_costmap_freshness_diagnostic = m1_nav2_support.costmap_freshness_diagnostic:main",
             "gpu_lidar_probe = m1_nav2_support.gpu_lidar_probe:main",
             "gpu_lidar_readback_ab = m1_nav2_support.gpu_lidar_readback_ab:main",
+            "gpu_lidar_scene_matrix = m1_nav2_support.gpu_lidar_scene_matrix:main",
+            "gpu_lidar_ros_capture = m1_nav2_support.gpu_lidar_ros_capture:main",
+            "gpu_lidar_dual_ab = m1_nav2_support.gpu_lidar_dual_ab:main",
         ],
     },
 )

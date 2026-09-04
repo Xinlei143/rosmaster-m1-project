@@ -64,6 +64,7 @@ def generate_launch_description():
                     "render_engine": LaunchConfiguration("render_engine"),
                     "gpu_lidar_min_angle": LaunchConfiguration("gpu_lidar_min_angle"),
                     "gpu_lidar_max_angle": LaunchConfiguration("gpu_lidar_max_angle"),
+                    "dual_gpu_lidar": LaunchConfiguration("dual_gpu_lidar"),
                 }.items(),
             ),
         ],
@@ -252,8 +253,11 @@ def generate_launch_description():
             "software_lidar", default_value="false",
             description="Use deterministic software LaserScan for Gazebo Sim 6 / WSLg."),
         DeclareLaunchArgument(
-            "render_engine", default_value="ogre2",
+            "render_engine", default_value="ogre",
             description="Gazebo rendering engine used by GPU LiDAR backend A/B tests."),
+        DeclareLaunchArgument(
+            "dual_gpu_lidar", default_value="true",
+            description="Use coincident front/rear 180-degree GPU LiDAR sensors."),
         DeclareLaunchArgument(
             "gpu_lidar_min_angle", default_value="-3.14159265359",
             description="GPU LiDAR horizontal minimum angle in radians."),
