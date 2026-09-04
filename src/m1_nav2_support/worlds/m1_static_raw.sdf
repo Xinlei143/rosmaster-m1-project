@@ -1,0 +1,78 @@
+<?xml version="1.0" ?>
+<!-- Static M1 scene for raw-only GPU-LiDAR diagnosis.  The dynamic obstacle
+     models and their velocity systems are intentionally absent. -->
+<sdf version="1.9">
+  <world name="m1_static_raw">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="ignition-gazebo-physics-system"
+            name="ignition::gazebo::systems::Physics"/>
+    <plugin filename="ignition-gazebo-user-commands-system"
+            name="ignition::gazebo::systems::UserCommands"/>
+    <plugin filename="ignition-gazebo-scene-broadcaster-system"
+            name="ignition::gazebo::systems::SceneBroadcaster"/>
+    <plugin filename="ignition-gazebo-sensors-system"
+            name="ignition::gazebo::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <light type="directional" name="sun">
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+    <model name="ground">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>12 12 0.1</size></box></geometry>
+          <surface><friction><ode><mu>50.0</mu></ode></friction></surface>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>12 12 0.1</size></box></geometry>
+          <material><diffuse>0.75 0.75 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="wall_north">
+      <pose>0 3.25 0.5 0 0 0</pose><static>true</static>
+      <link name="link"><collision name="collision"><geometry><box><size>8.2 0.1 1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>8.2 0.1 1</size></box></geometry></visual></link>
+    </model>
+    <model name="wall_south">
+      <pose>0 -3.25 0.5 0 0 0</pose><static>true</static>
+      <link name="link"><collision name="collision"><geometry><box><size>8.2 0.1 1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>8.2 0.1 1</size></box></geometry></visual></link>
+    </model>
+    <model name="wall_east">
+      <pose>4.05 0 0.5 0 0 0</pose><static>true</static>
+      <link name="link"><collision name="collision"><geometry><box><size>0.1 6.6 1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.1 6.6 1</size></box></geometry></visual></link>
+    </model>
+    <model name="wall_west">
+      <pose>-4.05 0 0.5 0 0 0</pose><static>true</static>
+      <link name="link"><collision name="collision"><geometry><box><size>0.1 6.6 1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.1 6.6 1</size></box></geometry></visual></link>
+    </model>
+    <model name="static_obstacle_1">
+      <pose>-3.0 2.2 0.3 0 0 0</pose><static>true</static>
+      <link name="link"><collision name="collision"><geometry><cylinder><radius>0.3</radius><length>0.6</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.3</radius><length>0.6</length></cylinder></geometry>
+          <material><diffuse>0.85 0.2 0.2 1</diffuse></material></visual></link>
+    </model>
+    <model name="static_obstacle_2">
+      <pose>0.0 0.0 0.3 0 0 0</pose><static>true</static>
+      <link name="link"><collision name="collision"><geometry><cylinder><radius>0.3</radius><length>0.6</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.3</radius><length>0.6</length></cylinder></geometry>
+          <material><diffuse>1 0.75 0.05 1</diffuse></material></visual></link>
+    </model>
+    <model name="goal_marker">
+      <pose>2.5 1.5 0.02 0 0 0</pose><static>true</static>
+      <link name="link"><visual name="visual"><visibility_flags>0x01</visibility_flags>
+        <geometry><cylinder><radius>0.20</radius><length>0.03</length></cylinder></geometry>
+        <material><diffuse>1 0.85 0.05 1</diffuse><emissive>0.5 0.4 0 1</emissive></material>
+      </visual></link>
+    </model>
+  </world>
+</sdf>

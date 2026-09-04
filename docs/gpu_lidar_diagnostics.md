@@ -13,6 +13,26 @@ colcon build --packages-select m1_nav2_support --symlink-install
 source install/setup.bash
 ```
 
+For the raw-only scene-isolation matrix (Test A and R0--R5), run the
+server-only collector.  It captures the native Gazebo Transport topic directly
+and deliberately does not start `m1_gazebo.launch.py`, Nav2,
+`ros_gz_bridge`, RViz, or the obstacle mover:
+
+```bash
+ros2 run m1_nav2_support gpu_lidar_scene_matrix \
+  --output-root results/gpu_lidar_scene_matrix_20260903 \
+  --duration 180 --repeats 3 --bad-streak 60 --max-wall-seconds 420
+```
+
+The runner stores each repeat's raw JSON, Gazebo logs, expanded/converted
+model input, metadata, and `status.json`.  Its top-level summary is rebuilt
+from all durable per-repeat status files, so separately launched case groups
+remain one auditable matrix.  A bad-streak early stop is only 60 consecutive
+667-beam frames that are all `-Inf`; partial `-Inf` is measured separately.
+
+The older GUI/bridge matrix below is retained as historical evidence and is
+not a substitute for the raw-only scene-isolation matrix:
+
 Run a short pilot while the desktop display is available:
 
 ```bash
@@ -113,3 +133,34 @@ produced finite data but logged a 180-degree GPU-rays FOV cap, so it is not a
 valid replacement for this 360-degree sensor. `LIBGL_ALWAYS_SOFTWARE=1` was
 ignored because the EGL path explicitly selected a hardware device; it did
 not constitute a Mesa backend test.
+
+## 2026-09-04 raw-only scene-isolation result
+
+The first-round matrix is stored in
+[`results/gpu_lidar_scene_matrix_20260903`](../results/gpu_lidar_scene_matrix_20260903).
+It contains Test A plus R0--R5, with `3 x 180 s` repetitions per condition.
+All 21 repetitions were valid: each had exactly one native scan publisher,
+667 beams in every frame, no malformed frame, a successful Gazebo server and
+raw-capture exit, and a simulation duration between 180.004 and 180.079 s
+(2,213--2,222 frames per repetition).  The simulation-stamp gap p50, p95,
+and maximum were all 0.083 s; the acceptance check intentionally uses these
+steady-cadence values rather than the startup-sensitive endpoint rate.
+
+| condition | whole-frame `-Inf` | partial `-Inf` result |
+|---|---:|---|
+| Test A: static M1, raw-only | 0 | none |
+| R0: minimal world, world-loaded primitive | 0 | none |
+| R1: minimal world, dynamic primitive | 0 | none |
+| R2: M1 world, dynamic primitive | 0 | none |
+| R3: minimal world, dynamic full M1 | 0 | reproducible: repeat mean 0.566--0.568%; one frame at most 9.895% |
+| R4: M1 world, dynamic full M1 | 0 | none |
+| R5: M1 world, world-loaded full M1 | 0 | none |
+
+Thus this matrix **did not reproduce the historical whole-frame latch-up**:
+there were no good-to-bad whole-frame transitions, recoveries, or all-negative
+frames in any repeat.  It does show a smaller, reproducible partial-range
+phenomenon in R3 that is absent from R4, even though both use a dynamically
+created full M1.  That is a scene/model interaction lead for a future OGRE2
+render-path comparison, not evidence that it is the historical latch-up's
+root cause and not authorization to change Nav2, the bridge, shaders, or the
+production sensor path.

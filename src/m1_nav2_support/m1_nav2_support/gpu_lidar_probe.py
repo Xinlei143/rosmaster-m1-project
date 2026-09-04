@@ -101,6 +101,86 @@ def _percentile(values, percentile):
     return ordered[lower] + fraction * (ordered[upper] - ordered[lower])
 
 
+def _expected_beam_count(frame_stats, expected_beam_count):
+    """Choose the caller's beam contract or the observed modal beam count."""
+    if expected_beam_count is not None:
+        return int(expected_beam_count)
+    counts = [frame["beam_count"] for frame in frame_stats]
+    if not counts:
+        return None
+    return max(set(counts), key=counts.count)
+
+
+def is_all_negative_frame(frame, expected_beam_count):
+    """Return true only for an expected-width frame made entirely of -Inf."""
+    return (
+        expected_beam_count is not None
+        and frame["beam_count"] == int(expected_beam_count)
+        and frame["negative_inf_count"] == int(expected_beam_count)
+    )
+
+
+def summarize_transitions(frame_stats, stamp_ns, expected_beam_count=None):
+    """Describe whole-frame negative-infinity transitions without clamping data."""
+    frames = list(frame_stats)
+    expected = _expected_beam_count(frames, expected_beam_count)
+    states = [
+        "all_negative" if is_all_negative_frame(frame, expected) else "other"
+        for frame in frames
+    ]
+    all_negative_indices = [
+        index for index, state in enumerate(states)
+        if state == "all_negative"
+    ]
+    good_to_bad = sum(
+        previous != "all_negative" and current == "all_negative"
+        for previous, current in zip(states, states[1:]))
+    if states and states[0] == "all_negative":
+        good_to_bad += 1
+    bad_to_good = sum(
+        previous == "all_negative" and current != "all_negative"
+        for previous, current in zip(states, states[1:]))
+
+    streaks = []
+    start = None
+    for index, state in enumerate(states + ["other"]):
+        if state == "all_negative" and start is None:
+            start = index
+        elif state != "all_negative" and start is not None:
+            streaks.append((start, index - 1))
+            start = None
+
+    stamps = list(stamp_ns)
+
+    def elapsed_seconds(first, last):
+        if first == last:
+            return 0.0
+        if first >= len(stamps) or last >= len(stamps):
+            return None
+        first_stamp = stamps[first]
+        last_stamp = stamps[last]
+        if first_stamp is None or last_stamp is None:
+            return None
+        return (int(last_stamp) - int(first_stamp)) / 1e9
+
+    first_time = None
+    if all_negative_indices:
+        first_time = elapsed_seconds(0, all_negative_indices[0])
+    longest = max(streaks, key=lambda interval: interval[1] - interval[0]) if streaks else None
+    return {
+        "expected_beam_count": expected,
+        "all_negative_frame_count": len(all_negative_indices),
+        "time_to_first_all_negative_s": first_time,
+        "good_to_bad_transition_count": good_to_bad,
+        "bad_to_good_recovery_count": bad_to_good,
+        "longest_continuous_bad_frames": (
+            longest[1] - longest[0] + 1 if longest else 0),
+        "longest_continuous_bad_seconds": (
+            elapsed_seconds(*longest) if longest else None),
+        "terminal_frame_state": states[-1] if states else None,
+    }
+
+
 def _stamp_ns(document):
     if not isinstance(document, dict):
         return None
@@ -113,6 +193,15 @@ def _stamp_ns(document):
             stamp.get("nsec", stamp.get("nanosec", 0)))
     except (TypeError, ValueError):
         return None
+
+
+def frame_stats_from_document(document):
+    """Return raw range statistics and its simulation timestamp, if present."""
+    found = _ranges_from_document(document)
+    if found is None:
+        return None
+    ranges, range_max = found
+    return scan_range_stats(ranges, range_max), _stamp_ns(document)
 
 
 def summarize_frames(frame_stats, stamp_ns=None):
@@ -131,6 +220,7 @@ def summarize_frames(frame_stats, stamp_ns=None):
             "nan_ratio_mean": None,
         }
         summary.update(_stamp_summary(stamp_ns or []))
+        summary.update(summarize_transitions([], stamp_ns or []))
         return summary
 
     def mean(key):
@@ -150,11 +240,12 @@ def summarize_frames(frame_stats, stamp_ns=None):
         "nan_ratio_mean": mean("nan_ratio"),
     }
     summary.update(_stamp_summary(stamp_ns or []))
+    summary.update(summarize_transitions(frames, stamp_ns or []))
     return summary
 
 
 def _stamp_summary(stamp_ns):
-    stamps = [int(stamp) for stamp in stamp_ns]
+    stamps = [int(stamp) for stamp in stamp_ns if stamp is not None]
     gaps = [
         (later - earlier) / 1e9
         for earlier, later in zip(stamps, stamps[1:])
@@ -177,15 +268,13 @@ def analyze_text(text):
     stamp_ns = []
     malformed_documents = 0
     for document in iter_json_documents(text):
-        found = _ranges_from_document(document)
-        if found is None:
-            continue
-        ranges, range_max = found
         try:
-            frame_stats.append(scan_range_stats(ranges, range_max))
-            stamp = _stamp_ns(document)
-            if stamp is not None:
-                stamp_ns.append(stamp)
+            found = frame_stats_from_document(document)
+            if found is None:
+                continue
+            frame, stamp = found
+            frame_stats.append(frame)
+            stamp_ns.append(stamp)
         except (TypeError, ValueError):
             malformed_documents += 1
     summary = summarize_frames(frame_stats, stamp_ns)
