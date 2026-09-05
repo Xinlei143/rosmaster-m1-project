@@ -388,18 +388,7 @@ collision_monitor:
     base_shift_correction: true
     # Do not keep publishing a prior emergency stop after the scan is clear.
     stop_pub_timeout: 0.25
-    polygons: [PolygonSlow, PolygonStop]
-    PolygonSlow:
-      type: polygon
-      points: [0.50, 0.40, 0.50, -0.40, -0.50, -0.40, -0.50, 0.40]
-      action_type: slowdown
-      # Keep the robot visibly moving while a near obstacle is monitored.
-      # Actual collision is still handled by the smaller PolygonStop zone.
-      slowdown_ratio: 0.40
-      max_points: 4
-      visualize: true
-      polygon_pub_topic: polygon_slowdown
-      enabled: true
+    polygons: [PolygonStop]
     PolygonStop:
       type: polygon
       # M1 footprint (0.30 x 0.24 m) plus the same 0.02 m padding used by
