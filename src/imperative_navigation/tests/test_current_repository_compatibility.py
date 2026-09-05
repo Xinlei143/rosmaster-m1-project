@@ -59,6 +59,19 @@ def test_gazebo_launch_keeps_current_scan_relay_only_for_software_lidar():
     assert 'condition=IfCondition(LaunchConfiguration("software_lidar"))' in relay_block
 
 
+def test_gazebo_launch_forwards_deferred_gpu_lidar_arguments():
+    """The scoped support launch must retain LiDAR values until robot spawn."""
+    source = read(GAZEBO_LAUNCH)
+    for name, default in (
+        ("render_engine", "ogre"),
+        ("dual_gpu_lidar", "true"),
+        ("gpu_lidar_min_angle", "-3.14159265359"),
+        ("gpu_lidar_max_angle", "3.14159265359"),
+    ):
+        assert f'"{name}": LaunchConfiguration("{name}")' in source
+        assert f'DeclareLaunchArgument("{name}", default_value="{default}"' in source
+
+
 def test_real_launch_is_dry_run_by_default_and_publishes_raw_imperative_command():
     source = read(REAL_LAUNCH)
     assert 'DeclareLaunchArgument("enabled", default_value="false"' in source

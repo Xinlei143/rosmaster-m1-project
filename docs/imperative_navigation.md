@@ -1,8 +1,9 @@
 # Imperative Navigation 并行方法
 
 本分支恢复了历史提交 `b8ca8ca` 中的 Imperative 局部避障算法，并将 ROS 2 接口适配到当前仓库。
-当前 Nav2 MPPI 仍是默认方法；Imperative 需要通过独立启动文件运行，不能与 Nav2 Gazebo 控制器
-同时启动。
+当前 `main` 将 Nav2 MPPI、默认 Imperative 和 localized Imperative 作为并列仿真入口；Imperative
+仍必须通过独立启动文件运行，不能与 Nav2 Gazebo 控制器同时启动。完整系统接口说明见
+[system_architecture.md](system_architecture.md)。
 
 ## 算法链路
 
@@ -54,6 +55,15 @@ Gazebo：
 ```bash
 ros2 launch imperative_navigation imperative_m1_gazebo.launch.py \
   gui:=true rviz:=true software_lidar:=false dynamic_obstacles:=true
+```
+
+默认 Imperative 的目标只由 `goal_x/goal_y` 启动参数给定；它没有 RViz `2D Goal Pose` 订阅或导航 Action。
+
+localized Gazebo（AMCL、map 目标和 watchdog；默认干运行）：
+
+```bash
+ros2 launch imperative_navigation imperative_m1_localized_gazebo.launch.py \
+  gui:=true enabled:=false
 ```
 
 实机干运行：

@@ -37,14 +37,14 @@ def _stamp_ns(transform):
     return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
 
 
-def resolve_goal_odom(goal_map, transform, now_ns, max_age):
+def resolve_goal_odom(goal_map, transform, now_ns, max_age, future_tolerance=0.0):
     """Return a current odom-frame goal or ``None`` for unusable TF."""
 
     if transform is None:
         return None
     stamp_ns = _stamp_ns(transform)
     age = (int(now_ns) - stamp_ns) / 1e9
-    if stamp_ns <= 0 or age < 0.0 or age > float(max_age):
+    if (stamp_ns <= 0 or age < -float(future_tolerance) or
+            age > float(max_age)):
         return None
     return transform_point_2d(goal_map, transform)
-

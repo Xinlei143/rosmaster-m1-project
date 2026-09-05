@@ -62,6 +62,8 @@ def generate_launch_description():
                     "rviz": "false",
                     "software_lidar": LaunchConfiguration("software_lidar"),
                     "dynamic_obstacles": LaunchConfiguration("dynamic_obstacles"),
+                    "dynamic_seed": LaunchConfiguration("dynamic_seed"),
+                    "dynamic_motion_mode": LaunchConfiguration("dynamic_motion_mode"),
                     "render_engine": LaunchConfiguration("render_engine"),
                     "gpu_lidar_min_angle": LaunchConfiguration("gpu_lidar_min_angle"),
                     "gpu_lidar_max_angle": LaunchConfiguration("gpu_lidar_max_angle"),
@@ -136,7 +138,10 @@ def generate_launch_description():
         name="planner_server",
         output="screen",
         parameters=[configured_params],
-        remappings=[("/tf", "tf"), ("/tf_static", "tf_static")],
+        remappings=[
+            ("/tf", "tf"),
+            ("/tf_static", "tf_static"),
+        ],
     )
     behavior_server = Node(
         package="nav2_behaviors",
@@ -144,7 +149,11 @@ def generate_launch_description():
         name="behavior_server",
         output="screen",
         parameters=[configured_params],
-        remappings=[("/tf", "tf"), ("/tf_static", "tf_static")],
+        remappings=[
+            ("/tf", "tf"),
+            ("/tf_static", "tf_static"),
+            ("cmd_vel", "/cmd_vel_nav"),
+        ],
     )
     bt_navigator = Node(
         package="nav2_bt_navigator",
@@ -275,6 +284,12 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "dynamic_obstacles", default_value="true",
             description="Enable moving obstacles for navigation tests."),
+        DeclareLaunchArgument(
+            "dynamic_seed", default_value="20260814",
+            description="Deterministic seed for the moving-obstacle scenario."),
+        DeclareLaunchArgument(
+            "dynamic_motion_mode", default_value="continuous",
+            description="Obstacle motion: continuous or random_waypoint."),
         DeclareLaunchArgument("use_sim_time", default_value="true"),
         DeclareLaunchArgument("autostart", default_value="true"),
         DeclareLaunchArgument("namespace", default_value=""),

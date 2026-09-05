@@ -29,6 +29,31 @@ def test_localized_gazebo_launch_wires_truth_lidar_and_map_goal():
     assert '"dynamic_obstacles_topic"' not in source
 
 
+def test_localized_gazebo_launch_explicitly_allows_amcl_tf_lead_time():
+    source = GAZEBO.read_text()
+    assert '"global_tf_future_tolerance": LaunchConfiguration(' in source
+    assert '"global_tf_future_tolerance", default_value="0.5"' in source
+
+
+def test_localized_gazebo_launch_forwards_deferred_gpu_lidar_arguments():
+    source = GAZEBO.read_text()
+    for name, default in (
+        ("render_engine", "ogre"),
+        ("dual_gpu_lidar", "true"),
+        ("gpu_lidar_min_angle", "-3.14159265359"),
+        ("gpu_lidar_max_angle", "3.14159265359"),
+    ):
+        assert f'"{name}": LaunchConfiguration("{name}")' in source
+        assert f'DeclareLaunchArgument("{name}", default_value="{default}"' in source
+
+
+def test_localized_gazebo_launch_forwards_dynamic_scenario_controls():
+    source = GAZEBO.read_text()
+    for name, default in (("dynamic_seed", "20260814"), ("dynamic_motion_mode", "continuous")):
+        assert f'"{name}": LaunchConfiguration("{name}")' in source
+        assert f'DeclareLaunchArgument("{name}", default_value="{default}"' in source
+
+
 def test_localized_real_launch_disables_fake_slip_and_initial_pose_by_default():
     source = REAL.read_text()
     assert '"goal_frame": "map"' in source

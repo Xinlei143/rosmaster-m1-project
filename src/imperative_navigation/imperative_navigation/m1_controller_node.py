@@ -16,6 +16,7 @@ import numpy as np
 import rclpy
 import tf2_ros
 import torch
+from rclpy._rclpy_pybind11 import RCLError
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from geometry_msgs.msg import Point, PoseArray, PoseStamped, Twist
@@ -100,6 +101,7 @@ class ImperativeM1Controller(Node):
             ("command_topic", "/imperative/cmd_vel_raw"), ("odom_frame", "odom"),
             ("goal_frame", "odom"), ("global_frame", "map"),
             ("global_tf_max_age", 0.5),
+            ("global_tf_future_tolerance", 0.0),
             ("scan_timeout", 0.50), ("odom_timeout", 0.50),
             ("tf_max_age", 0.30),
             # Raw laser points always remain collision obstacles. These
@@ -292,6 +294,7 @@ class ImperativeM1Controller(Node):
             transform,
             now_ns,
             float(self.get_parameter("global_tf_max_age").value),
+            float(self.get_parameter("global_tf_future_tolerance").value),
         )
         if goal is None:
             self.last_global_tf = None
@@ -703,6 +706,11 @@ class ImperativeM1Controller(Node):
                     _, velocity_world = self.algorithm.step_robot(
                         position, current_velocity_world, acceleration)
                     profile["step_robot"] = time.perf_counter() - stage_start
+        except RCLError:
+            # Launch teardown can invalidate the publisher while this timer is
+            # already executing.  The independent watchdog owns the final
+            # stop guarantee once that happens, so do not log or republish.
+            return
         except Exception as error:
             # Planning is never allowed to leave a previous velocity command
             # active, irrespective of whether this is dry-run or live mode.
@@ -780,10 +788,27 @@ class ImperativeM1Controller(Node):
         command.linear.y = float(-sine * limited_velocity[0] + cosine * limited_velocity[1])
         # The planner is translational.  M1's mecanum base can execute x/y
         # body velocity without injecting an unplanned yaw rotation.
-        self.command_publisher.publish(command)
+        self.publish_message(self.command_publisher, command)
+
+    def publish_message(self, publisher, message):
+        """Publish only while the ROS context still owns this publisher.
+
+        Timer callbacks can overlap launch SIGINT teardown.  Once rclpy has
+        invalidated a publisher, the watchdog is the final safety boundary and
+        no further output attempt is useful.
+        """
+        try:
+            publisher.publish(message)
+        except RCLError:
+            # A live ROS context means this is an unexpected output fault, not
+            # launch teardown. Preserve it for the caller's normal error path.
+            if rclpy.ok():
+                raise
+            return False
+        return True
 
     def publish_stop(self):
-        self.command_publisher.publish(Twist())
+        return self.publish_message(self.command_publisher, Twist())
 
     def publish_stop_burst(self, count=3, interval_seconds=0.05):
         """Best-effort raw zero burst before process teardown.
@@ -795,7 +820,10 @@ class ImperativeM1Controller(Node):
         for index in range(count):
             if not rclpy.ok():
                 break
-            self.publish_stop()
+            try:
+                self.publish_stop()
+            except RCLError:
+                break
             if index + 1 < count:
                 time.sleep(interval_seconds)
 
@@ -816,7 +844,7 @@ class ImperativeM1Controller(Node):
                 pose.pose.position.x, pose.pose.position.y, pose.pose.orientation.w = (
                     float(position[0]), float(position[1]), 1.0)
                 path.poses.append(pose)
-        self.path_publisher.publish(path)
+        self.publish_message(self.path_publisher, path)
         markers, centers = MarkerArray(), PoseArray()
         centers.header.frame_id, centers.header.stamp = frame, stamp
         visible_track_ids = {track["id"] for track in self.planning_tracks}
@@ -837,8 +865,8 @@ class ImperativeM1Controller(Node):
             marker.scale.z, marker.color.r, marker.color.g, marker.color.a = 0.08, 1.0, 0.3, 0.8
             markers.markers.append(marker)
             centers.poses.append(marker.pose)
-        self.track_publisher.publish(markers)
-        self.status_publisher.publish(centers)
+        self.publish_message(self.track_publisher, markers)
+        self.publish_message(self.status_publisher, centers)
 
 
 def main(args=None):
@@ -855,7 +883,16 @@ def main(args=None):
         # best-effort raw-zero burst while this process still has a ROS context.
         if rclpy.ok():
             node.publish_stop_burst()
-        executor.shutdown()
-        node.destroy_node()
+        executor_shutdown_interrupted = False
+        try:
+            executor.shutdown()
+        except KeyboardInterrupt:
+            # A second SIGINT can interrupt the executor while it is waiting
+            # for an in-flight timer callback.  Do not destroy the node while
+            # that callback may still hold its publishers; process exit will
+            # release it after rclpy shutdown.
+            executor_shutdown_interrupted = True
+        if not executor_shutdown_interrupted:
+            node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

@@ -127,6 +127,21 @@ def test_gazebo_launch_waits_for_localization_before_navigation_lifecycle():
     assert 'actions=[navigation_lifecycle]' in launch_source
 
 
+def test_behavior_server_routes_recovery_commands_through_safety_chain():
+    launch_source = GAZEBO_LAUNCH.read_text()
+    start = launch_source.index("behavior_server = Node")
+    end = launch_source.index("bt_navigator = Node")
+    behavior_block = launch_source[start:end]
+    assert '("cmd_vel", "/cmd_vel_nav")' in behavior_block
+
+
+def test_nav2_gazebo_forwards_dynamic_scenario_controls():
+    launch_source = GAZEBO_LAUNCH.read_text()
+    for name, default in (("dynamic_seed", "20260814"), ("dynamic_motion_mode", "continuous")):
+        assert f'"{name}": LaunchConfiguration("{name}")' in launch_source
+        assert f'"{name}", default_value="{default}"' in launch_source
+
+
 def test_scan_dropout_gate_is_opt_in_and_only_applies_to_software_lidar():
     launch_source = GAZEBO_LAUNCH.read_text()
 
