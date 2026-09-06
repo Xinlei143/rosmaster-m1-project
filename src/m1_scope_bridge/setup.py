@@ -21,6 +21,7 @@ setup(
     entry_points={
         "console_scripts": [
             "bag_export = m1_scope_bridge.bag_export:main",
+            "scope_preprocess = m1_scope_bridge.scope_ogm:main",
         ],
     },
 )
