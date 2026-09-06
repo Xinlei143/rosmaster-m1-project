@@ -85,6 +85,16 @@ def test_nav2_gazebo_forwards_gpu_lidar_fov_for_the_cubemap_ab():
     assert '"gpu_lidar_max_angle", default_value="3.14159265359"' in launch_source
 
 
+def test_scope_observer_is_opt_in_and_receives_no_navigation_output_topics():
+    launch_source = GAZEBO_LAUNCH.read_text()
+    assert '"scope_enabled", default_value="false"' in launch_source
+    assert 'condition=IfCondition(LaunchConfiguration("scope_enabled"))' in launch_source
+    assert '"scope_model_path"' in launch_source
+    assert '"/scope/' not in launch_source
+    package_xml = (GAZEBO_LAUNCH.parents[1] / "package.xml").read_text()
+    assert "<exec_depend>m1_scope_predictor</exec_depend>" in package_xml
+
+
 def test_gpu_lidar_scan_marks_and_clears_both_costmaps():
     for costmap_name in ("local_costmap", "global_costmap"):
         scan = costmap_scan_source(costmap_name)

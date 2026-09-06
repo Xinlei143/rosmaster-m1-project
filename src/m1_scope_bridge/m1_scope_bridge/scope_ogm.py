@@ -101,6 +101,28 @@ def compensate_points(points, past_laser_pose, future_laser_pose):
     return transform_points(invert_transform(future).dot(past), points)
 
 
+def build_scope_input_window(scan_points, past_base_poses, current_pose,
+                             current_twist, base_to_laser, horizon_seconds):
+    """Build one future-frame SCOPE input using shared SE(2) preprocessing."""
+    if len(scan_points) != SEQ_LEN:
+        raise ValueError("SCOPE input requires exactly 10 scans")
+    past_base_poses = np.asarray(past_base_poses, dtype=np.float64)
+    if past_base_poses.shape != (SEQ_LEN, 3):
+        raise ValueError("past base poses must have shape [10,3]")
+    future_pose = integrate_body_twist(
+        current_pose, current_twist, float(horizon_seconds))
+    base_to_laser = np.asarray(base_to_laser, dtype=np.float64)
+    if base_to_laser.shape != (3, 3):
+        raise ValueError("base_to_laser must be a planar 3x3 transform")
+    future_laser = pose_to_matrix(future_pose).dot(base_to_laser)
+    grids = []
+    for points, pose in zip(scan_points, past_base_poses):
+        past_laser = pose_to_matrix(pose).dot(base_to_laser)
+        grids.append(points_to_grid(
+            compensate_points(points, past_laser, future_laser)))
+    return np.stack(grids, axis=0), future_pose, future_laser
+
+
 def _scan_points(data, index):
     return scan_to_points(
         data["scan_ranges"][index], data["scan_angle_min"][index],
@@ -242,14 +264,9 @@ def preprocess_dataset(input_path, output_path, horizon_steps=5,
             odom_stamps, data["odom_pose"], data["odom_twist"],
             np.array([history_actual[-1]], dtype=np.int64))
         dt = float(target_actual - history_actual[-1]) / 1e9
-        future_pose = integrate_body_twist(current_pose[0], current_twist[0], dt)
-        future_laser = pose_to_matrix(future_pose).dot(base_laser)
-        input_sequence = []
-        for scan_index, pose in zip(history_indices, past_pose):
-            past_laser = pose_to_matrix(pose).dot(base_laser)
-            points = compensate_points(_scan_points(data, scan_index),
-                                       past_laser, future_laser)
-            input_sequence.append(points_to_grid(points))
+        input_sequence, future_pose, future_laser = build_scope_input_window(
+            [_scan_points(data, index) for index in history_indices],
+            past_pose, current_pose[0], current_twist[0], base_laser, dt)
 
         gt_pose, _ = interpolate_odometry(
             gt_stamps, data["ground_truth_odom_pose"],
@@ -259,7 +276,7 @@ def preprocess_dataset(input_path, output_path, horizon_steps=5,
             dynamic_stamps, data["dynamic_obstacle_pose"], target_actual)
         obstacle_laser = transform_points(invert_transform(gt_laser), obstacle_world)
 
-        all_inputs.append(np.stack(input_sequence, axis=0))
+        all_inputs.append(input_sequence)
         all_ground_truth.append(points_to_grid(_scan_points(data, target_index)))
         all_roi.append(_roi_grid(obstacle_laser, roi_radius))
         accepted_anchor_target.append(anchor_target)

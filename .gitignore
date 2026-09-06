@@ -11,4 +11,5 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .matplotlib/
+.venv-scope-runtime/
 /artifacts/scope_m1/

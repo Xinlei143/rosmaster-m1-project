@@ -1,0 +1,43 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Fixed Frame: odom
+    Frame Rate: 30
+  Displays:
+    - Class: rviz_default_plugins/RobotModel
+      Enabled: true
+      Name: RobotModel
+      Description Topic:
+        Value: /robot_description
+    - Class: rviz_default_plugins/LaserScan
+      Enabled: true
+      Name: LaserScan
+      Topic:
+        Value: /scan
+      Size (Pixels): 3
+    - Class: rviz_default_plugins/Map
+      Enabled: true
+      Name: Current SCOPE OGM
+      Topic:
+        Value: /scope/current_ogm
+      Alpha: 0.25
+    - Class: rviz_default_plugins/Map
+      Enabled: true
+      Name: SCOPE Prediction +0.5 s
+      Topic:
+        Value: /scope/prediction
+      Alpha: 0.65
+      Color Scheme: costmap
+    - Class: rviz_default_plugins/Map
+      Enabled: true
+      Name: SCOPE Uncertainty
+      Topic:
+        Value: /scope/uncertainty
+      Alpha: 0.35
+      Color Scheme: raw
+Window Geometry:
+  Width: 1400
+  Height: 900

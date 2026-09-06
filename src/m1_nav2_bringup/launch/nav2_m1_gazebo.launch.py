@@ -18,6 +18,7 @@ from nav2_common.launch import RewrittenYaml
 def generate_launch_description():
     bringup_share = get_package_share_directory("m1_nav2_bringup")
     support_share = get_package_share_directory("m1_nav2_support")
+    scope_share = get_package_share_directory("m1_scope_predictor")
     gazebo_launch = os.path.join(
         support_share, "launch", "m1_gazebo.launch.py")
     params_file = os.path.join(bringup_share, "config", "nav2_params.yaml")
@@ -71,6 +72,20 @@ def generate_launch_description():
                 }.items(),
             ),
         ],
+    )
+
+    scope_observer = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(
+            scope_share, "launch", "scope_online.launch.py")),
+        condition=IfCondition(LaunchConfiguration("scope_enabled")),
+        launch_arguments={
+            "use_sim_time": use_sim_time,
+            "model_path": LaunchConfiguration("scope_model_path"),
+            "device": LaunchConfiguration("scope_device"),
+            "num_samples": LaunchConfiguration("scope_num_samples"),
+            "evaluator_enabled": LaunchConfiguration("scope_evaluator_enabled"),
+            "rviz": "false",
+        }.items(),
     )
 
     scan_relay = Node(
@@ -291,6 +306,15 @@ def generate_launch_description():
             "dynamic_motion_mode", default_value="continuous",
             description="Obstacle motion: continuous or random_waypoint."),
         DeclareLaunchArgument("use_sim_time", default_value="true"),
+        DeclareLaunchArgument("scope_enabled", default_value="false"),
+        DeclareLaunchArgument(
+            "scope_model_path",
+            default_value=(
+                "/home/xinlei/Data/SCOPE-repro/reference/scope/"
+                "model/scope_model.pth")),
+        DeclareLaunchArgument("scope_device", default_value="cuda"),
+        DeclareLaunchArgument("scope_num_samples", default_value="4"),
+        DeclareLaunchArgument("scope_evaluator_enabled", default_value="false"),
         DeclareLaunchArgument("autostart", default_value="true"),
         DeclareLaunchArgument("namespace", default_value=""),
         DeclareLaunchArgument("params_file", default_value=params_file),
@@ -299,6 +323,7 @@ def generate_launch_description():
 
     return LaunchDescription(arguments + [
         gazebo,
+        scope_observer,
         scan_relay,
         map_server,
         amcl,
