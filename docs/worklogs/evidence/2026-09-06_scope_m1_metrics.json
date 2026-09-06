@@ -1,0 +1,42 @@
+{
+  "schema_version": "scope_m1_compact_evidence_v1",
+  "protocol": {
+    "horizon_seconds": 0.5,
+    "num_samples": 32,
+    "evaluated_windows": 200,
+    "selection": "deterministic evenly spaced over 1866 valid windows",
+    "threshold": 0.5,
+    "dynamic_roi_radius_m": 0.45,
+    "seed": 1337,
+    "device": "cpu"
+  },
+  "scope_micro": {
+    "overall": {"occupied_iou": 0.4999752927805505, "f1": 0.6666447043320705},
+    "dynamic_roi": {"occupied_iou": 0.20151885001356115, "f1": 0.33544018058690744}
+  },
+  "copy_last_micro": {
+    "overall": {"occupied_iou": 0.5894347100542344, "f1": 0.7416910003609042},
+    "dynamic_roi": {"occupied_iou": 0.1769464105156724, "f1": 0.3006872852233677}
+  },
+  "scope_macro": {
+    "overall": {"occupied_iou": 0.5131103789096404, "f1": 0.6636487977658814},
+    "dynamic_roi": {"occupied_iou": 0.2092520640752361, "f1": 0.3245899599292617}
+  },
+  "latency_seconds_per_window": {
+    "mean": 3.7243761662298858,
+    "median": 3.7379707294985565,
+    "p95": 3.8783282572478126,
+    "scope": "five autoregressive model forwards, CPU, batch of 32 samples"
+  },
+  "zero_shot_evidence": "mixed",
+  "source_identity": {
+    "scope_git_commit": "211b199ebfcbe54eeac99202bbe62aca593f7bed",
+    "scope_git_status": "clean",
+    "checkpoint_sha256": "0eb7d348530670e0547c24e91df583540930c89668937723a4e7161d6fab7d92",
+    "model_sha256": "a7b404a2909bcc8e563e3a70520bf4398957fab98f85d80eab4fdf70e24906f6",
+    "convlstm_sha256": "eb350d8d2297a2a2f7e652500aeabaa5c92ab6b3bbd9d0a77d516f0718b114e2",
+    "python": "3.7.16",
+    "torch": "1.7.1",
+    "numpy": "1.21.5"
+  }
+}
