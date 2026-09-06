@@ -41,7 +41,9 @@ IoU/F1/precision/recall plus MAE, and evaluates both the full grid and a 0.45 m 
 Undefined per-window ratios are excluded from macro means and counted. `copy_last_ogm` is the
 persistence baseline. Latency covers five autoregressive forwards for all samples in one window.
 
-Generate the deterministic middle-ranked diagnostic (not selected by metric):
+Generate the deterministic dynamic-obstacle diagnostic. It selects the evaluated window with the
+largest count of observed future occupied cells inside its dynamic ROI; it does not use prediction
+metrics for selection:
 
 ```bash
 conda run -n scope-repro /usr/bin/env MPLBACKEND=Agg MPLCONFIGDIR=/tmp/scope-m1-mpl \
@@ -50,6 +52,10 @@ conda run -n scope-repro /usr/bin/env MPLBACKEND=Agg MPLCONFIGDIR=/tmp/scope-m1-
   --predictions artifacts/scope_m1/evaluation/h05/predictions_h05.npz \
   --output artifacts/scope_m1/evaluation/h05/five_panel.png
 ```
+
+For a matched timeline containing `t-0.9`, `t-0.6`, `t-0.3`, and `t`, plus SCOPE prediction and
+observed target at both `t+0.5` and `t+1.0`, use `visualize_timeline.py`. Its two prediction inputs
+must contain the same anchor timestamp; `--h05-dataset-index` selects that shared scene.
 
 Large bags, arrays, and predictions live below ignored `artifacts/scope_m1/`. Only compact summaries
 and one diagnostic image belong in Git.

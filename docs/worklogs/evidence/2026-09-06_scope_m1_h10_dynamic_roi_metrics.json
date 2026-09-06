@@ -1,0 +1,52 @@
+{
+  "schema_version": "scope_m1_dynamic_roi_evidence_v1",
+  "protocol": {
+    "horizon_seconds": 1.0,
+    "horizon_steps": 10,
+    "num_samples": 32,
+    "evaluated_windows": 200,
+    "valid_preprocessed_windows": 1861,
+    "dynamic_roi_nonempty_windows": 1723,
+    "selection": "deterministic evenly spaced over valid windows",
+    "threshold": 0.5,
+    "dynamic_roi_radius_m": 0.45,
+    "seed": 1337,
+    "device": "cpu"
+  },
+  "dynamic_roi_micro": {
+    "pretrained_scope": {
+      "occupied_iou": 0.06068840579710145,
+      "f1": 0.11443210930828351,
+      "precision": 0.199207135777998,
+      "recall": 0.08027156549520767,
+      "mae": 0.16161804310384276
+    },
+    "copy_last": {
+      "occupied_iou": 0.0785966820777808,
+      "f1": 0.14573877962682805,
+      "precision": 0.19767441860465115,
+      "recall": 0.11541533546325879,
+      "mae": 0.15528462737189477
+    }
+  },
+  "dynamic_roi_macro": {
+    "pretrained_scope": {"occupied_iou": 0.06492418789095723, "f1": 0.11111364454800461},
+    "copy_last": {"occupied_iou": 0.07835913259207174, "f1": 0.13258344355899793}
+  },
+  "latency_seconds_per_window": {
+    "mean": 7.743553091604881,
+    "median": 7.7763697629998205,
+    "p95": 7.945314928646985,
+    "scope": "10 autoregressive model forwards, CPU, batch of 32 samples"
+  },
+  "source_identity": {
+    "scope_git_commit": "211b199ebfcbe54eeac99202bbe62aca593f7bed",
+    "scope_git_status": "clean",
+    "checkpoint_sha256": "0eb7d348530670e0547c24e91df583540930c89668937723a4e7161d6fab7d92",
+    "model_sha256": "a7b404a2909bcc8e563e3a70520bf4398957fab98f85d80eab4fdf70e24906f6",
+    "convlstm_sha256": "eb350d8d2297a2a2f7e652500aeabaa5c92ab6b3bbd9d0a77d516f0718b114e2",
+    "python": "3.7.16",
+    "torch": "1.7.1",
+    "numpy": "1.21.5"
+  }
+}

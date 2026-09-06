@@ -28,8 +28,34 @@ def select_window_indices(total, maximum, minimum=100):
     return np.rint(np.linspace(0, total - 1, count)).astype(np.int64)
 
 
+def select_explicit_indices(indices, total):
+    selected = np.asarray(indices, dtype=np.int64)
+    total = int(total)
+    if selected.ndim != 1 or len(selected) == 0:
+        raise ValueError(
+            "explicit dataset indices must be a nonempty one-dimensional list")
+    if np.any(selected < 0) or np.any(selected >= total):
+        raise ValueError("explicit dataset index is outside the dataset")
+    if len(np.unique(selected)) != len(selected):
+        raise ValueError(
+            "explicit dataset indices must not contain duplicates")
+    return selected
+
+
+def _parse_explicit_indices(value):
+    try:
+        return [int(item) for item in value.split(",") if item]
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "dataset indices must be comma-separated integers") from error
+
+
 def _safe_divide(numerator, denominator):
     return float(numerator) / float(denominator) if denominator else None
+
+
+def latency_measurement_scope(horizon_steps):
+    return "%d autoregressive model forwards per window" % int(horizon_steps)
 
 
 def _confusion_metrics(probability, target, threshold, mask):
@@ -225,8 +251,12 @@ def evaluate(args):
         dataset_horizon = int(dataset["horizon_steps"].item())
         if dataset_horizon != int(args.horizon):
             raise ValueError("dataset horizon does not match --horizon")
-        selected = select_window_indices(
-            len(dataset["input_ogm"]), args.max_windows, args.min_windows)
+        if args.dataset_indices is None:
+            selected = select_window_indices(
+                len(dataset["input_ogm"]), args.max_windows, args.min_windows)
+        else:
+            selected = select_explicit_indices(
+                args.dataset_indices, len(dataset["input_ogm"]))
         inputs = dataset["input_ogm"][selected]
         ground_truth = dataset["ground_truth_ogm"][selected]
         copy_last = dataset["copy_last_ogm"][selected].astype(np.float32)
@@ -319,7 +349,7 @@ def evaluate(args):
             "mean": float(latencies.mean()),
             "median": float(np.median(latencies)),
             "p95": float(np.percentile(latencies, 95.0)),
-            "measurement_scope": "five autoregressive model forwards per window",
+            "measurement_scope": latency_measurement_scope(args.horizon),
         },
         "scope": scope_metrics,
         "copy_last": copy_metrics,
@@ -343,6 +373,11 @@ def _parse_args(argv=None):
     parser.add_argument("--num-samples", type=int, default=32)
     parser.add_argument("--max-windows", type=int, default=200)
     parser.add_argument("--min-windows", type=int, default=100)
+    parser.add_argument(
+        "--dataset-indices", type=_parse_explicit_indices,
+        help=(
+            "comma-separated explicit dataset indices; bypasses uniform "
+            "selection"))
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
