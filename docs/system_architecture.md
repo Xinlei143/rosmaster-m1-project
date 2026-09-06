@@ -20,7 +20,7 @@
 | --- | --- | --- | --- |
 | 给目标 | `/navigate_to_pose` Action | launch `goal_x, goal_y` | launch `goal_x, goal_y`，语义在 `map` 坐标 |
 | 位姿 | AMCL 用 `/scan` + `/map` 发布 `map → odom`；局部控制仍用 `/odom` | 只用 `/odom`，无 AMCL/TF listener | `/odom` 做局部状态；每周期把 map 目标经 `map → odom` 变换为 odom 目标 |
-| 感知 | `/scan` 进入 AMCL、两张 costmap、collision monitor | 原生订阅 `/scan`；软件模式直接订阅 `/sim_scan` | `/scan` 加 `odom ← laser` TF 生成局部点 |
+| 感知 | `/scan` 进入 AMCL、两张 costmap、collision monitor | 原生 `/scan`（软件模式 `/sim_scan`）+ `/odom` yaw 手动转换为 odom 轴下障碍物点 | `/scan` + `laser→odom` TF 转换为 odom 轴下障碍物点 |
 | 规划 | NavFn 全局路径 + MPPI 局部控制 | 节点内聚类、跟踪、局部地图、rollout | 同类局部规划，但有全局 TF 时效门 |
 | 最终命令 | `cmd_vel_nav → cmd_vel_smoothed → m1/cmd_vel_raw → cmd_vel` | 直接 `/cmd_vel` | `imperative/cmd_vel_raw → watchdog → /cmd_vel` |
 
