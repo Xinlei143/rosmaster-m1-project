@@ -1,0 +1,31 @@
+digraph nav2_mppi_internal {
+  graph [rankdir=LR, bgcolor="white", pad="0.28", nodesep="0.42", ranksep="0.76", splines=ortho,
+         fontname="Noto Sans CJK SC", fontsize=18,
+         label="Nav2 MPPI：进程内算法流（不是 ROS 节点图）", labelloc=t];
+  node [fontname="Noto Sans CJK SC", fontsize=11, margin="0.13,0.08", penwidth=1.2];
+  edge [fontname="Noto Sans CJK SC", fontsize=9, color="#6B7280", arrowsize=0.72];
+  goal [label="目标位姿", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  costmap_g [label="全局代价地图", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  navfn [label="NavFn\n搜索全局路径", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  path [label="参考全局路径", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  state [label="当前状态\n(/odom + TF)", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  costmap_l [label="局部代价地图", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  sampling [label="MPPI 采样 / rollout\n控制序列 + 运动模型", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  critics [label="critic 评分\nConstraint / Cost / Goal / GoalAngle\nPathAlign / PathFollow / PathAngle\nPreferForward / Twirling", shape=box, style="rounded,filled", fillcolor="#FFF0E8", color="#C98216"];
+  optimize [label="加权更新最优控制序列", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  velocity [label="下一时刻速度\n→ /cmd_vel_nav", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  params [label="核心参数（nav2_params.yaml）\ntime_steps / model_dt / batch_size\nvx_std / vy_std / wz_std / critics", shape=note, style=filled, fillcolor="#F8FAFC", color="#94A3B8"];
+  goal -> navfn;
+  costmap_g -> navfn;
+  navfn -> path;
+  path -> sampling;
+  state -> sampling;
+  costmap_l -> sampling;
+  sampling -> critics;
+  path -> critics;
+  costmap_l -> critics;
+  critics -> optimize;
+  optimize -> velocity;
+  params -> sampling [style=dashed, color="#7E5AA6"];
+  params -> critics [style=dashed, color="#7E5AA6"];
+}

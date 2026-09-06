@@ -91,17 +91,6 @@ Visualization Manager:
         Value: /local_costmap/published_footprint
     - Alpha: 1
       Class: rviz_default_plugins/Polygon
-      Color: 255; 170; 0
-      Enabled: false
-      Name: Collision Slowdown Polygon
-      Topic:
-        Depth: 5
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /polygon_slowdown
-    - Alpha: 1
-      Class: rviz_default_plugins/Polygon
       Color: 255; 0; 0
       Enabled: false
       Name: Collision Stop Polygon

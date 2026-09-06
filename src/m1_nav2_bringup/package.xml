@@ -26,6 +26,7 @@
   <exec_depend>nav2_rviz_plugins</exec_depend>
   <exec_depend>nav2_smoother</exec_depend>
   <exec_depend>nav2_velocity_smoother</exec_depend>
+  <exec_depend>m1_scope_predictor</exec_depend>
   <exec_depend>nav2_waypoint_follower</exec_depend>
   <exec_depend>nav2_bringup</exec_depend>
   <exec_depend>rclpy</exec_depend>

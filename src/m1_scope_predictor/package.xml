@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>m1_scope_predictor</name>
+  <version>0.1.0</version>
+  <description>Observer-only online SCOPE prediction for the Rosmaster M1.</description>
+  <maintainer email="user@example.com">Rosmaster user</maintainer>
+  <license>Apache-2.0</license>
+  <license>MIT</license>
+  <buildtool_depend>ament_python</buildtool_depend>
+  <depend>diagnostic_msgs</depend>
+  <depend>m1_scope_bridge</depend>
+  <depend>nav_msgs</depend>
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>tf2_ros</depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <test_depend>python3-pytest</test_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>

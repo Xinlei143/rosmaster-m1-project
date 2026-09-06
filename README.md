@@ -1,16 +1,8 @@
-# Rosmaster M1 Imperative 避障
+# Rosmaster M1 双算法导航仿真
 
-`imperative` 分支以 Imperative 局部避障算法为主。默认仿真入口为
-`imperative_navigation` 包的独立启动文件；算法使用 LaserScan 相邻回波聚类、`[x, y, vx, vy]`
-常速度 Kalman 跟踪与 20 步滚动时域候选轨迹，动态障碍物未来位置采用常速度外推，而非学习模型。
-
-- 底盘：M1 麦克纳姆轮，控制输出包含 `linear.x`、`linear.y` 与 `angular.z`；
-- 障碍输入：`/scan`；
-- 仿真控制输出：Gazebo 直接使用 `/cmd_vel`；
-- 可视化与算法细节：[`docs/imperative_navigation.md`](docs/imperative_navigation.md)。
-
-仓库保留 Nav2 MPPI 启动文件作为对照基线，但它不是本分支的默认方法。同一时刻只能启动
-Imperative 或 Nav2 Gazebo 控制器之一，不能同时运行。
+当前 `main` 同时提供 Nav2 MPPI、默认 Imperative 和 localized Imperative 三套 Gazebo 仿真入口。
+它们共享 M1 世界和传感器/里程计适配层，但同一时刻只能启动一个控制器。完整的节点、Topic、Action、Service、TF、参数与控制链说明见
+[系统架构文档](docs/system_architecture.md)。
 
 ## 构建
 
@@ -50,37 +42,27 @@ export PYTHONPATH=/home/xinlei/Data/robotics_ws/miniconda3/envs/pendulum-rl/lib/
 构建使用 `/usr/bin/colcon`，运行 ROS 节点使用 `/usr/bin/python3`；仅通过 `PYTHONPATH` 引入
 `pendulum-rl` 的 `torch`，这样不会把系统 `rclpy` 与 Conda 的 Python 版本混用。
 
-## Imperative Gazebo 与 RViz 仿真
+## 三套 Gazebo 入口
 
-```bash
-ros2 launch imperative_navigation imperative_m1_gazebo.launch.py \
-  gui:=true rviz:=true dynamic_obstacles:=true software_lidar:=false
-```
-
-Gazebo 启动后，在 RViz 选择 **2D Goal Pose** 设置目标点。Imperative 控制器依据实时 `/scan`
-跟踪动态障碍物并生成局部候选轨迹；缺少有效传感器、里程计或 TF 数据时会保持安全零指令。
-
-## Nav2 MPPI 对照基线
-
-如需运行保留的 Nav2 MPPI 基线，可使用以下 Gazebo 入口：
+Nav2 MPPI（支持 RViz **2D Goal Pose** 与 Nav2 Action）：
 
 ```bash
 ros2 launch m1_nav2_bringup nav2_m1_gazebo.launch.py \
   gui:=true rviz:=true dynamic_obstacles:=true software_lidar:=false
 ```
 
-实机 Nav2 基线要求底盘驱动提供 `/scan`、`/odom` 与 `odom → base_footprint` TF：
+默认 Imperative（目标仅由启动参数 `goal_x/goal_y` 给定）：
 
 ```bash
-ros2 launch m1_nav2_bringup nav2_m1_real.launch.py rviz:=true
+ros2 launch imperative_navigation imperative_m1_gazebo.launch.py \
+  gui:=true rviz:=true dynamic_obstacles:=true software_lidar:=false
 ```
 
-## Imperative 实机入口
-
-实机入口默认是干运行，只有显式设置 `enabled:=true` 才会输出物理原始指令；watchdog 应在独立终端
-运行：
+localized Imperative（AMCL + map 目标；默认干运行）：
 
 ```bash
-ros2 launch imperative_navigation imperative_cmd_watchdog.launch.py
-ros2 launch imperative_navigation imperative_m1_real.launch.py enabled:=false
+ros2 launch imperative_navigation imperative_m1_localized_gazebo.launch.py \
+  gui:=true enabled:=false
 ```
+
+本文档只保证并说明仿真路径；实机入口需要单独的硬件驱动与安全验收。

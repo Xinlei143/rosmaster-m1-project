@@ -1,0 +1,46 @@
+digraph imperative_localized_ros {
+  graph [rankdir=TB, bgcolor="white", pad="0.28", nodesep="0.40", ranksep="0.76", splines=polyline,
+         fontname="Noto Sans CJK SC", fontsize=20,
+         label="定位版 Imperative：AMCL 提供全局约束，局部算法仍在 odom 中规划", labelloc=t];
+  node [fontname="Noto Sans CJK SC", fontsize=11, margin="0.13,0.08", penwidth=1.25];
+  edge [fontname="Noto Sans CJK SC", fontsize=9.5, color="#6B7280", arrowsize=0.72];
+  map_server [label="map_server", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  map [label="/map", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  scan [label="/scan", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  odom [label="/odom", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  amcl [label="amcl\n发布 map → odom TF", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  lifecycle [label="lifecycle_manager_localization", shape=box, style="rounded,filled", fillcolor="#F8FAFC", color="#64748B"];
+  lifecycle_service [label="/.../manage_nodes\nService", shape=hexagon, style="filled,dashed", fillcolor="#F3E8FF", color="#7E5AA6"];
+  goal [label="launch 参数\ngoal_x, goal_y（map 坐标）", shape=note, style=filled, fillcolor="#F8FAFC", color="#64748B"];
+  controller [label="imperative_m1_controller\nm1_controller_node.py", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  raw [label="/imperative/cmd_vel_raw", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  watchdog [label="imperative_localized_cmd_watchdog\n超时零速度", shape=box, style="rounded,filled", fillcolor="#FFEAE5", color="#C7523B"];
+  cmd [label="/cmd_vel", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  bridge [label="m1_gazebo_bridge_core\n→ Gazebo", shape=box, style="rounded,filled", fillcolor="#F1F5F9", color="#475569"];
+  planned [label="/imperative/planned_path", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  tracks [label="/imperative/tracks", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  centers [label="/imperative/obstacle_centers", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  observer [label="RViz / 观测者", shape=box, style="rounded,filled", fillcolor="#F8FAFC", color="#64748B"];
+  absence [label="无业务 Action server\n无业务 Service\n（TF listener 是内部 API，不是 Topic 节点）", shape=note, style=filled, fillcolor="#F8FAFC", color="#94A3B8"];
+
+  map_server -> map;
+  map -> amcl;
+  scan -> amcl;
+  scan -> controller;
+  odom -> controller;
+  amcl -> controller [label="TF：map → odom\n每周期查询并校验时效", style=dashed, color="#7E5AA6"];
+  goal -> controller;
+  controller -> raw;
+  raw -> watchdog;
+  watchdog -> cmd;
+  cmd -> bridge;
+  controller -> planned;
+  controller -> tracks;
+  controller -> centers;
+  planned -> observer;
+  tracks -> observer;
+  centers -> observer;
+  lifecycle -> lifecycle_service [style=dashed, color="#7E5AA6", label="对外提供"];
+  lifecycle -> amcl [style=dashed, color="#7E5AA6", label="调用受管节点的\nChangeState Service"];
+  lifecycle -> map_server [style=dashed, color="#7E5AA6"];
+}

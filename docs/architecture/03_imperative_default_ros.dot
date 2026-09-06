@@ -1,0 +1,33 @@
+digraph imperative_default_ros {
+  graph [rankdir=LR, bgcolor="white", pad="0.28", nodesep="0.44", ranksep="0.78", splines=polyline,
+         fontname="Noto Sans CJK SC", fontsize=20,
+         label="默认 Imperative：主 ROS 通信链（不使用地图、AMCL 或 TF listener）", labelloc=t];
+  node [fontname="Noto Sans CJK SC", fontsize=11.5, margin="0.13,0.08", penwidth=1.25];
+  edge [fontname="Noto Sans CJK SC", fontsize=9.5, color="#6B7280", arrowsize=0.72];
+  goal [label="launch 参数\ngoal_x, goal_y", shape=note, style=filled, fillcolor="#F8FAFC", color="#64748B"];
+  scan [label="/scan\n原生双 GPU LiDAR", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  sim_scan [label="/sim_scan\n仅 software_lidar:=true", shape=ellipse, style="filled,dashed", fillcolor="#FFF7E7", color="#C98216"];
+  odom [label="/odom", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  dynamic [label="/m1/dynamic_obstacles\n（始终订阅；仅饱和扫描回退时作新鲜门）", shape=ellipse, style="filled,dashed", fillcolor="#FFF7E7", color="#C98216"];
+  controller [label="imperative_controller\ncontroller_node.py", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  cmd [label="/cmd_vel\n直接发布", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  bridge [label="m1_gazebo_bridge_core\n→ Gazebo", shape=box, style="rounded,filled", fillcolor="#F1F5F9", color="#475569"];
+  planned [label="/imperative/planned_path\nnav_msgs/Path", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  tracks [label="/imperative/tracks\nMarkerArray", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  observer [label="RViz / 观测者", shape=box, style="rounded,filled", fillcolor="#F8FAFC", color="#64748B"];
+  software_note [label="注意：软件 LiDAR 模式下控制器直接订阅 /sim_scan。\nscan_relay 仍会 /sim_scan → /scan，但只服务其他通用消费者。", shape=note, style=filled, fillcolor="#F8FAFC", color="#94A3B8"];
+  absence [label="无业务 Action server\n无业务 Service\n无 TF listener", shape=note, style=filled, fillcolor="#F8FAFC", color="#94A3B8"];
+
+  goal -> controller;
+  scan -> controller [label="原生模式"];
+  sim_scan -> controller [label="软件模式", style=dashed];
+  odom -> controller;
+  dynamic -> controller [style=dashed];
+  controller -> cmd;
+  cmd -> bridge;
+  controller -> planned;
+  controller -> tracks;
+  planned -> observer;
+  tracks -> observer;
+  software_note -> sim_scan [style=dotted, arrowhead=none];
+}

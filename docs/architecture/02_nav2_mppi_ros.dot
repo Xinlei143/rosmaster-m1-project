@@ -1,0 +1,83 @@
+digraph nav2_mppi_ros {
+  graph [rankdir=TB, bgcolor="white", pad="0.28", nodesep="0.38", ranksep="0.74", splines=polyline,
+         fontname="Noto Sans CJK SC", fontsize=20,
+         label="Nav2 MPPI：主 ROS 通信链（公共 Gazebo 层见图 1）", labelloc=t];
+  node [fontname="Noto Sans CJK SC", fontsize=11, margin="0.12,0.08", penwidth=1.25];
+  edge [fontname="Noto Sans CJK SC", fontsize=9.5, color="#6B7280", arrowsize=0.7];
+
+  user [label="用户 / RViz2", shape=box, style="rounded,filled", fillcolor="#F8FAFC", color="#64748B"];
+  nav_action [label="/navigate_to_pose\nNavigateToPose Action", shape=parallelogram, style=filled, fillcolor="#E4F6EA", color="#278B57"];
+  bt [label="bt_navigator\n行为树调度", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  plan_action [label="/compute_path_to_pose\nComputePathToPose Action", shape=parallelogram, style=filled, fillcolor="#E4F6EA", color="#278B57"];
+  planner [label="planner_server\nNavFn 全局规划", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  plan [label="/plan\nnav_msgs/Path", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  follow_action [label="/follow_path\nFollowPath Action", shape=parallelogram, style=filled, fillcolor="#E4F6EA", color="#278B57"];
+  controller [label="controller_server\nMPPI 局部控制", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  cmd_nav [label="/cmd_vel_nav", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  smoother [label="velocity_smoother", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  cmd_smooth [label="/cmd_vel_smoothed", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  collision [label="collision_monitor\nPolygonStop + scan", shape=box, style="rounded,filled", fillcolor="#FFEAE5", color="#C7523B"];
+  cmd_raw [label="/m1/cmd_vel_raw", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  watchdog [label="m1_cmd_watchdog\n超时强制零速度", shape=box, style="rounded,filled", fillcolor="#FFEAE5", color="#C7523B"];
+  cmd_vel [label="/cmd_vel", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  bridge [label="m1_gazebo_bridge_core\n→ Gazebo MecanumDrive", shape=box, style="rounded,filled", fillcolor="#F1F5F9", color="#475569"];
+
+  scan [label="/scan", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  odom [label="/odom", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  map [label="/map", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  map_server [label="map_server", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  amcl [label="amcl\n发布 map → odom TF", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  global_costmap [label="global_costmap/global_costmap", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  local_costmap [label="local_costmap/local_costmap", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  behavior [label="behavior_server\nSpin / BackUp / Wait 等恢复", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  waypoint [label="waypoint_follower\nFollowWaypoints Action", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+
+  user -> nav_action;
+  nav_action -> bt;
+  bt -> plan_action;
+  plan_action -> planner;
+  planner -> plan;
+  bt -> follow_action [label="Action goal 内含\nComputePath 的结果 Path"];
+  follow_action -> controller;
+  controller -> cmd_nav;
+  behavior -> cmd_nav [label="恢复动作也走同一安全链"];
+  cmd_nav -> smoother;
+  smoother -> cmd_smooth;
+  cmd_smooth -> collision;
+  collision -> cmd_raw;
+  cmd_raw -> watchdog;
+  watchdog -> cmd_vel;
+  cmd_vel -> bridge;
+
+  map_server -> map;
+  map -> amcl;
+  map -> global_costmap;
+  scan -> amcl;
+  scan -> global_costmap;
+  scan -> local_costmap;
+  scan -> collision;
+  odom -> controller;
+  odom -> local_costmap;
+  odom -> global_costmap;
+  amcl -> controller [label="TF：map → odom", style=dashed, color="#7E5AA6"];
+  amcl -> planner [label="TF：map → odom", style=dashed, color="#7E5AA6"];
+  global_costmap -> planner [label="全局代价地图"];
+  local_costmap -> controller [label="局部代价地图"];
+  bt -> behavior [label="恢复 Action"];
+  bt -> waypoint [label="多路点 Action"];
+
+  lifecycle_loc [label="lifecycle_manager_localization", shape=box, style="rounded,filled", fillcolor="#F8FAFC", color="#64748B"];
+  lifecycle_nav [label="lifecycle_manager_navigation", shape=box, style="rounded,filled", fillcolor="#F8FAFC", color="#64748B"];
+  lifecycle_safety [label="lifecycle_manager_safety", shape=box, style="rounded,filled", fillcolor="#F8FAFC", color="#64748B"];
+  svc_loc [label="/.../manage_nodes\nService", shape=hexagon, style="filled,dashed", fillcolor="#F3E8FF", color="#7E5AA6"];
+  svc_nav [label="/.../manage_nodes\nService", shape=hexagon, style="filled,dashed", fillcolor="#F3E8FF", color="#7E5AA6"];
+  svc_safety [label="/.../manage_nodes\nService", shape=hexagon, style="filled,dashed", fillcolor="#F3E8FF", color="#7E5AA6"];
+  lifecycle_loc -> svc_loc [style=dashed, color="#7E5AA6", label="对外提供"];
+  lifecycle_nav -> svc_nav [style=dashed, color="#7E5AA6", label="对外提供"];
+  lifecycle_safety -> svc_safety [style=dashed, color="#7E5AA6", label="对外提供"];
+  lifecycle_loc -> amcl [style=dashed, color="#7E5AA6", label="调用受管节点的\nChangeState Service"];
+  lifecycle_nav -> controller [style=dashed, color="#7E5AA6", label="调用受管节点的\nChangeState Service"];
+  lifecycle_safety -> collision [style=dashed, color="#7E5AA6", label="调用受管节点的\nChangeState Service"];
+
+  note [label="/plan 是 planner 的发布 Topic（用于观察）；\nFollowPath 实际收到的是 BT 在 Action goal 中携带的 Path。\n绿：Action；紫：Service；虚线：TF/生命周期调用。", shape=note, style=filled, fillcolor="#F8FAFC", color="#94A3B8"];
+}

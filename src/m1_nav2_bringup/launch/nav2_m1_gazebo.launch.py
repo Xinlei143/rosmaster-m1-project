@@ -18,6 +18,7 @@ from nav2_common.launch import RewrittenYaml
 def generate_launch_description():
     bringup_share = get_package_share_directory("m1_nav2_bringup")
     support_share = get_package_share_directory("m1_nav2_support")
+    scope_share = get_package_share_directory("m1_scope_predictor")
     gazebo_launch = os.path.join(
         support_share, "launch", "m1_gazebo.launch.py")
     params_file = os.path.join(bringup_share, "config", "nav2_params.yaml")
@@ -62,6 +63,8 @@ def generate_launch_description():
                     "rviz": "false",
                     "software_lidar": LaunchConfiguration("software_lidar"),
                     "dynamic_obstacles": LaunchConfiguration("dynamic_obstacles"),
+                    "dynamic_seed": LaunchConfiguration("dynamic_seed"),
+                    "dynamic_motion_mode": LaunchConfiguration("dynamic_motion_mode"),
                     "render_engine": LaunchConfiguration("render_engine"),
                     "gpu_lidar_min_angle": LaunchConfiguration("gpu_lidar_min_angle"),
                     "gpu_lidar_max_angle": LaunchConfiguration("gpu_lidar_max_angle"),
@@ -69,6 +72,20 @@ def generate_launch_description():
                 }.items(),
             ),
         ],
+    )
+
+    scope_observer = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(
+            scope_share, "launch", "scope_online.launch.py")),
+        condition=IfCondition(LaunchConfiguration("scope_enabled")),
+        launch_arguments={
+            "use_sim_time": use_sim_time,
+            "model_path": LaunchConfiguration("scope_model_path"),
+            "device": LaunchConfiguration("scope_device"),
+            "num_samples": LaunchConfiguration("scope_num_samples"),
+            "evaluator_enabled": LaunchConfiguration("scope_evaluator_enabled"),
+            "rviz": "false",
+        }.items(),
     )
 
     scan_relay = Node(
@@ -136,7 +153,10 @@ def generate_launch_description():
         name="planner_server",
         output="screen",
         parameters=[configured_params],
-        remappings=[("/tf", "tf"), ("/tf_static", "tf_static")],
+        remappings=[
+            ("/tf", "tf"),
+            ("/tf_static", "tf_static"),
+        ],
     )
     behavior_server = Node(
         package="nav2_behaviors",
@@ -144,7 +164,11 @@ def generate_launch_description():
         name="behavior_server",
         output="screen",
         parameters=[configured_params],
-        remappings=[("/tf", "tf"), ("/tf_static", "tf_static")],
+        remappings=[
+            ("/tf", "tf"),
+            ("/tf_static", "tf_static"),
+            ("cmd_vel", "/cmd_vel_nav"),
+        ],
     )
     bt_navigator = Node(
         package="nav2_bt_navigator",
@@ -275,7 +299,22 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "dynamic_obstacles", default_value="true",
             description="Enable moving obstacles for navigation tests."),
+        DeclareLaunchArgument(
+            "dynamic_seed", default_value="20260814",
+            description="Deterministic seed for the moving-obstacle scenario."),
+        DeclareLaunchArgument(
+            "dynamic_motion_mode", default_value="continuous",
+            description="Obstacle motion: continuous or random_waypoint."),
         DeclareLaunchArgument("use_sim_time", default_value="true"),
+        DeclareLaunchArgument("scope_enabled", default_value="false"),
+        DeclareLaunchArgument(
+            "scope_model_path",
+            default_value=(
+                "/home/xinlei/Data/SCOPE-repro/reference/scope/"
+                "model/scope_model.pth")),
+        DeclareLaunchArgument("scope_device", default_value="cuda"),
+        DeclareLaunchArgument("scope_num_samples", default_value="4"),
+        DeclareLaunchArgument("scope_evaluator_enabled", default_value="false"),
         DeclareLaunchArgument("autostart", default_value="true"),
         DeclareLaunchArgument("namespace", default_value=""),
         DeclareLaunchArgument("params_file", default_value=params_file),
@@ -284,6 +323,7 @@ def generate_launch_description():
 
     return LaunchDescription(arguments + [
         gazebo,
+        scope_observer,
         scan_relay,
         map_server,
         amcl,

@@ -7,6 +7,7 @@ import yaml
 
 PARAMS = Path(__file__).parents[1] / "config" / "nav2_params.yaml"
 GAZEBO_LAUNCH = Path(__file__).parents[1] / "launch" / "nav2_m1_gazebo.launch.py"
+RVIZ_CONFIG = Path(__file__).parents[1] / "rviz" / "m1_nav2.rviz"
 
 
 def costmap_scan_source(costmap_name):
@@ -84,6 +85,16 @@ def test_nav2_gazebo_forwards_gpu_lidar_fov_for_the_cubemap_ab():
     assert '"gpu_lidar_max_angle", default_value="3.14159265359"' in launch_source
 
 
+def test_scope_observer_is_opt_in_and_receives_no_navigation_output_topics():
+    launch_source = GAZEBO_LAUNCH.read_text()
+    assert '"scope_enabled", default_value="false"' in launch_source
+    assert 'condition=IfCondition(LaunchConfiguration("scope_enabled"))' in launch_source
+    assert '"scope_model_path"' in launch_source
+    assert '"/scope/' not in launch_source
+    package_xml = (GAZEBO_LAUNCH.parents[1] / "package.xml").read_text()
+    assert "<exec_depend>m1_scope_predictor</exec_depend>" in package_xml
+
+
 def test_gpu_lidar_scan_marks_and_clears_both_costmaps():
     for costmap_name in ("local_costmap", "global_costmap"):
         scan = costmap_scan_source(costmap_name)
@@ -125,6 +136,21 @@ def test_gazebo_launch_waits_for_localization_before_navigation_lifecycle():
     assert 'default_value="35.0"' in launch_source
     assert 'period=LaunchConfiguration("navigation_start_delay")' in launch_source
     assert 'actions=[navigation_lifecycle]' in launch_source
+
+
+def test_behavior_server_routes_recovery_commands_through_safety_chain():
+    launch_source = GAZEBO_LAUNCH.read_text()
+    start = launch_source.index("behavior_server = Node")
+    end = launch_source.index("bt_navigator = Node")
+    behavior_block = launch_source[start:end]
+    assert '("cmd_vel", "/cmd_vel_nav")' in behavior_block
+
+
+def test_nav2_gazebo_forwards_dynamic_scenario_controls():
+    launch_source = GAZEBO_LAUNCH.read_text()
+    for name, default in (("dynamic_seed", "20260814"), ("dynamic_motion_mode", "continuous")):
+        assert f'"{name}": LaunchConfiguration("{name}")' in launch_source
+        assert f'"{name}", default_value="{default}"' in launch_source
 
 
 def test_scan_dropout_gate_is_opt_in_and_only_applies_to_software_lidar():
@@ -203,18 +229,22 @@ def test_mppi_path_alignment_and_forward_preference_weights():
     assert follow_path["GoalCritic"]["cost_weight"] == 8.0
 
 
-def test_collision_monitor_uses_requested_slowdown_and_stop_polygons():
+def test_collision_monitor_uses_only_the_stop_polygon():
     parameters = collision_monitor_parameters()
-    slow = parameters["PolygonSlow"]
     stop = parameters["PolygonStop"]
 
-    assert slow["points"] == [0.50, 0.40, 0.50, -0.40, -0.50, -0.40, -0.50, 0.40]
-    assert slow["action_type"] == "slowdown"
-    assert slow["slowdown_ratio"] == 0.40
-    assert slow["max_points"] == 4
+    assert parameters["polygons"] == ["PolygonStop"]
+    assert "PolygonSlow" not in parameters
     assert stop["points"] == [0.30, 0.25, 0.30, -0.25, -0.30, -0.25, -0.30, 0.25]
     assert stop["action_type"] == "stop"
     assert stop["max_points"] == 4
+
+
+def test_rviz_has_no_collision_slowdown_polygon_display():
+    rviz_config = RVIZ_CONFIG.read_text()
+
+    assert "Collision Slowdown Polygon" not in rviz_config
+    assert "/polygon_slowdown" not in rviz_config
 
 
 def test_terminal_goal_and_planner_tolerances_are_consistent_for_near_obstacles():
