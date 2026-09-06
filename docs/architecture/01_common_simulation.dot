@@ -1,0 +1,96 @@
+digraph common_simulation {
+  graph [
+    rankdir=TB,
+    bgcolor="white",
+    pad="0.28",
+    nodesep="0.42",
+    ranksep="0.76",
+    splines=polyline,
+    fontname="Noto Sans CJK SC",
+    fontsize=20,
+    label="公共仿真层：所有三种控制器共用的 ROS 2 / Gazebo 数据通路",
+    labelloc=t
+  ];
+  node [fontname="Noto Sans CJK SC", fontsize=12, margin="0.13,0.08", penwidth=1.3];
+  edge [fontname="Noto Sans CJK SC", fontsize=10, color="#6B7280", arrowsize=0.75];
+
+  gazebo [label="Gazebo 仿真世界\nMecanumDrive + 双 GPU LiDAR", shape=box, style="rounded,filled", fillcolor="#F1F5F9", color="#475569"];
+  bridge_core [label="m1_gazebo_bridge_core\nROS ↔ Gazebo 核心桥", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  odom_slip [label="odom_slip_simulator\n制造 /odom 与 odom→base_footprint TF", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  robot_state [label="robot_state_publisher\n固定机身子树 TF", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  controller [label="某一算法入口\nNav2 MPPI / Imperative / Localized", shape=box, style="rounded,filled", fillcolor="#E7F8EF", color="#278B57"];
+  velocity_note [label="最终速度链因算法而异：\nNav2 和定位版须经过安全节点；\n默认 Imperative 才直接发布 /cmd_vel。\n详见图 2–4。", shape=note, style=filled, fillcolor="#F8FAFC", color="#64748B"];
+
+  gt_odom [label="/ground_truth/odom\nnav_msgs/Odometry", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  odom [label="/odom\nnav_msgs/Odometry", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  cmd_vel [label="/cmd_vel\ngeometry_msgs/Twist", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  dynamic_tf [label="/m1/gazebo_dynamic_tf\nTFMessage", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  dynamic_obstacles [label="/m1/dynamic_obstacles\ngeometry_msgs/PoseArray", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  obstacle_cmd [label="/model/moving_obstacle_{1,2,3}/cmd_vel", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  set_pose [label="/world/m1/set_pose\nGazebo SetEntityPose 服务", shape=hexagon, style="filled,dashed", fillcolor="#F3E8FF", color="#7E5AA6"];
+
+  subgraph cluster_native {
+    label="原生双 GPU LiDAR 路径（本次运行时抓图使用）";
+    color="#7AA6D8";
+    style="rounded,dashed";
+    scan_bridge [label="m1_gazebo_bridge_dual_scan", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+    merger [label="m1_dual_laser_merger\n合并前后雷达", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+    scan_front [label="/scan_front", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+    scan_rear [label="/scan_rear", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+    scan [label="/scan\nsensor_msgs/LaserScan", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+    scan_cloud [label="/scan_merged_cloud\nPointCloud2（观测）", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  }
+
+  subgraph cluster_software {
+    label="软件 LiDAR 替代路径（software_lidar:=true；未用于本次原始图）";
+    color="#94A3B8";
+    style="rounded,dashed";
+    software_lidar [label="software_lidar\n由真值与障碍物合成扫描", shape=box, style="rounded,filled", fillcolor="#F8FAFC", color="#64748B"];
+    sim_scan [label="/sim_scan\nsensor_msgs/LaserScan", shape=ellipse, style=filled, fillcolor="#FFF7E7", color="#C98216"];
+    scan_relay [label="scan_relay\n仅为通用 /scan 消费者转发", shape=box, style="rounded,filled", fillcolor="#F8FAFC", color="#64748B"];
+  }
+
+  obstacle_mover [label="dynamic_obstacle_mover\n动态障碍物控制 / 仿真真值发布", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+
+  gazebo -> gt_odom [label="真值里程计"];
+  gt_odom -> odom_slip;
+  odom_slip -> odom;
+  odom -> controller;
+  cmd_vel -> bridge_core;
+  bridge_core -> gazebo [label="ROS→Gazebo\nMecanumDrive"];
+  gazebo -> bridge_core [label="Gazebo→ROS\n真值 / 时钟 / 动态 TF", dir=both, arrowtail=none];
+
+  robot_state -> controller [label="TF：base_footprint 以下固定链", style=dashed, color="#7E5AA6"];
+  odom_slip -> controller [label="TF：odom → base_footprint", style=dashed, color="#7E5AA6"];
+
+  gazebo -> scan_bridge [label="前 / 后 GPU 扫描"];
+  scan_bridge -> scan_front;
+  scan_bridge -> scan_rear;
+  scan_front -> merger;
+  scan_rear -> merger;
+  merger -> scan;
+  merger -> scan_cloud;
+  scan -> controller;
+
+  gt_odom -> software_lidar [style=dashed, color="#94A3B8"];
+  dynamic_obstacles -> software_lidar [style=dashed, color="#94A3B8"];
+  software_lidar -> sim_scan [style=dashed, color="#94A3B8"];
+  sim_scan -> scan_relay [style=dashed, color="#94A3B8"];
+  scan_relay -> scan [style=dashed, color="#94A3B8", label="给通用消费者"];
+
+  velocity_note -> cmd_vel [style=dotted, arrowhead=none, color="#94A3B8"];
+
+  bridge_core -> dynamic_tf;
+  dynamic_tf -> obstacle_mover;
+  obstacle_mover -> dynamic_obstacles;
+  obstacle_mover -> obstacle_cmd;
+  obstacle_cmd -> bridge_core;
+  obstacle_mover -> set_pose [style=dashed, color="#7E5AA6", label="客户端调用（仅停放障碍物时）"];
+  set_pose -> bridge_core [style=dashed, color="#7E5AA6", label="服务桥"];
+
+  legend_node [label="蓝色圆角框：ROS 节点", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  legend_topic [label="橙色椭圆：Topic", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  legend_service [label="紫色六边形：Service", shape=hexagon, style="filled,dashed", fillcolor="#F3E8FF", color="#7E5AA6"];
+  legend_node -> legend_topic [style=invis];
+  legend_topic -> legend_service [style=invis];
+}

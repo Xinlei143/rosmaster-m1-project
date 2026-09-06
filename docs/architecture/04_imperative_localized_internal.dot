@@ -1,0 +1,33 @@
+digraph imperative_localized_internal {
+  graph [rankdir=LR, bgcolor="white", pad="0.28", nodesep="0.40", ranksep="0.76", splines=ortho,
+         fontname="Noto Sans CJK SC", fontsize=18,
+         label="定位版 Imperative：进程内算法流（不是 ROS 节点图）", labelloc=t];
+  node [fontname="Noto Sans CJK SC", fontsize=11, margin="0.13,0.08", penwidth=1.2];
+  edge [fontname="Noto Sans CJK SC", fontsize=9, color="#6B7280", arrowsize=0.72];
+  goal_map [label="配置的 map 目标", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  tf [label="map → odom TF\n时效 / 未来容差校验", shape=ellipse, style=filled, fillcolor="#F3E8FF", color="#7E5AA6"];
+  goal_odom [label="当前 odom 目标", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  scan [label="LaserScan", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  odom [label="Odom 状态", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  lidar_tf [label="odom ← laser TF\n时效校验", shape=ellipse, style=filled, fillcolor="#F3E8FF", color="#7E5AA6"];
+  points [label="扫描转机器人相对点", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  detect [label="聚类 / 跟踪 / 局部点地图", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  rollout [label="候选轨迹 / 速度选择\n在 odom 坐标中执行", shape=box, style="rounded,filled", fillcolor="#FFF0E8", color="#C98216"];
+  safety [label="输入新鲜度、TF、急停距离、enabled\n任一失败 → 零 raw command", shape=box, style="rounded,filled", fillcolor="#FFEAE5", color="#C7523B"];
+  cmd [label="/imperative/cmd_vel_raw", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  params [label="关键参数\nscan_timeout, odom_timeout, tf_max_age\nglobal_tf_max_age, global_tf_future_tolerance\nenabled, max_speed, max_acceleration", shape=note, style=filled, fillcolor="#F8FAFC", color="#94A3B8"];
+  goal_map -> goal_odom;
+  tf -> goal_odom;
+  scan -> points;
+  odom -> points;
+  lidar_tf -> points;
+  points -> detect;
+  detect -> rollout;
+  odom -> rollout;
+  goal_odom -> rollout;
+  rollout -> safety;
+  safety -> cmd;
+  params -> tf [style=dashed, color="#7E5AA6"];
+  params -> lidar_tf [style=dashed, color="#7E5AA6"];
+  params -> safety [style=dashed, color="#7E5AA6"];
+}

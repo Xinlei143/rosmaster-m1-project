@@ -1,0 +1,32 @@
+digraph imperative_default_internal {
+  graph [rankdir=LR, bgcolor="white", pad="0.28", nodesep="0.42", ranksep="0.76", splines=ortho,
+         fontname="Noto Sans CJK SC", fontsize=18,
+         label="默认 Imperative：进程内算法流（不是 ROS 节点图）", labelloc=t];
+  node [fontname="Noto Sans CJK SC", fontsize=11, margin="0.13,0.08", penwidth=1.2];
+  edge [fontname="Noto Sans CJK SC", fontsize=9, color="#6B7280", arrowsize=0.72];
+  scan [label="LaserScan", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  odom [label="Odom 状态", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  goal [label="固定目标 (goal_x, goal_y)", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  points [label="有效量程 → 世界坐标点\n饱和 GPU scan 检测", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  detections [label="聚类 / 几何检测\n静态与动态障碍物候选", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  tracks [label="轨迹更新 + 确认过滤\nKalman 风格跟踪状态", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  map [label="去动态残影后的局部点地图", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  rollout [label="候选加速度 rollout\ntrajectory_horizon × heading × speed", shape=box, style="rounded,filled", fillcolor="#FFF0E8", color="#C98216"];
+  choose [label="碰撞 / 目标 / 动态阻挡评分\n选择速度", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  cmd [label="Twist → /cmd_vel", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  params [label="关键参数\ncontrol_period, max_speed, max_acceleration\nrobot_radius, safety_margin\ntrajectory_horizon=20, heading_samples=41, speed_samples=4", shape=note, style=filled, fillcolor="#F8FAFC", color="#94A3B8"];
+  scan -> points;
+  odom -> points;
+  points -> detections;
+  detections -> tracks;
+  points -> map;
+  tracks -> map;
+  map -> rollout;
+  tracks -> rollout;
+  odom -> rollout;
+  goal -> rollout;
+  rollout -> choose;
+  choose -> cmd;
+  params -> rollout [style=dashed, color="#7E5AA6"];
+  params -> choose [style=dashed, color="#7E5AA6"];
+}

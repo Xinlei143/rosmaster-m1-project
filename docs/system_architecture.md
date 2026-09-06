@@ -1,213 +1,213 @@
-# Rosmaster M1 双算法仿真系统架构
+# M1 导航仿真架构：从 rqt_graph 到算法
 
-本文档以当前 `main` 分支为准，说明三套**仿真**入口：Nav2 MPPI、默认 Imperative、localized Imperative。
-实机驱动、底盘硬件激光和实机启动链不在本文范围；它们不能从 Gazebo bridge 推断出来。
+本文覆盖三套**Gazebo 仿真**入口：Nav2 MPPI、默认 Imperative、定位版 Imperative。使用原生双 GPU LiDAR；实机 launch、串口底盘和外设不在本版范围。一次只运行一个控制器，避免多个节点同时发布 `/cmd_vel`。
 
-## 1. 总览与启动边界
+## 图例与读图原则
 
-三套控制器共享同一个 M1 Gazebo 世界、机器人模型、ROS–Gazebo bridge 和 `/odom` 适配层，但同一时刻只能启动其中一套控制器，避免多个发布者竞争 `/cmd_vel`。
+| 图形/颜色 | 含义 |
+| --- | --- |
+| 蓝色圆角框 | ROS 节点 |
+| 橙色椭圆 | ROS Topic；方向是发布者 → Topic → 订阅者 |
+| 绿色平行四边形 | ROS Action |
+| 紫色六边形 | ROS Service；紫色虚线也表示 TF 或生命周期调用 |
+| 灰色便笺 | launch 参数、条件或不存在的接口 |
 
-```mermaid
-flowchart LR
-  G[Gazebo Sim: MecanumDrive] -->|ground truth| GT[/ground_truth/odom]
-  G -->|clock| CLK[/clock]
-  CMD[/cmd_vel] --> B[m1_gazebo_bridge_core] --> G
-  GT --> SLIP[odom_slip_simulator]
-  SLIP --> ODOM[/odom + odom→base_footprint]
-  GT --> SW[software_lidar]
-  SW --> SIMSCAN[/sim_scan]
-  SIMSCAN --> RELAY[scan_relay]
-  RELAY --> SCAN[/scan]
-  GPU[Native GPU LiDAR] --> SCAN
-```
+主图只保留主链。`/rosout`、`/parameter_events`、节点自动生成的参数 Service，以及 Action 的 feedback/status/cancel 子 Topic 在原始 rqt_graph 附录中保留。
 
-| 入口 | 启动文件 | 定位与目标 | 最终控制路径 |
+## 先走一条消息
+
+| 阶段 | Nav2 MPPI | 默认 Imperative | 定位版 Imperative |
 | --- | --- | --- | --- |
-| Nav2 MPPI | `nav2_m1_gazebo.launch.py` | AMCL；`map` 目标由 Nav2 Action 提供 | 完整平滑、碰撞监控和 watchdog 链 |
-| 默认 Imperative | `imperative_m1_gazebo.launch.py` | 仅 `/odom`；启动参数 `goal_x/goal_y` | 控制器直接发布 `/cmd_vel` |
-| localized Imperative | `imperative_m1_localized_gazebo.launch.py` | AMCL；`map` 中的启动参数目标 | 原始指令经 watchdog 到 `/cmd_vel` |
+| 给目标 | `/navigate_to_pose` Action | launch `goal_x, goal_y` | launch `goal_x, goal_y`，语义在 `map` 坐标 |
+| 位姿 | AMCL 用 `/scan` + `/map` 发布 `map → odom`；局部控制仍用 `/odom` | 只用 `/odom`，无 AMCL/TF listener | `/odom` 做局部状态；每周期把 map 目标经 `map → odom` 变换为 odom 目标 |
+| 感知 | `/scan` 进入 AMCL、两张 costmap、collision monitor | 原生订阅 `/scan`；软件模式直接订阅 `/sim_scan` | `/scan` 加 `odom ← laser` TF 生成局部点 |
+| 规划 | NavFn 全局路径 + MPPI 局部控制 | 节点内聚类、跟踪、局部地图、rollout | 同类局部规划，但有全局 TF 时效门 |
+| 最终命令 | `cmd_vel_nav → cmd_vel_smoothed → m1/cmd_vel_raw → cmd_vel` | 直接 `/cmd_vel` | `imperative/cmd_vel_raw → watchdog → /cmd_vel` |
 
-默认传感器是原生双 180° GPU LiDAR：`/scan_front` 和 `/scan_rear` 经 `dual_laser_merger` 合成 `/scan`。设定 `software_lidar:=true` 时，`software_lidar` 使用 `/ground_truth/odom` 生成 `/sim_scan`，`scan_relay` 复制为统一的 `/scan`。这样滑移只影响 `/odom`，不污染仿真观测。
+`/cmd_vel` 才是 Gazebo 底盘最终接收的命令；在 Nav2 和定位版 Imperative 中，前面的速度 Topic 不等于最终底盘速度。
 
-## 2. 公共仿真基础层
+## 图 1：公共 Gazebo 层
 
-| 节点 | 职责 | 主要输入 | 主要输出 |
-| --- | --- | --- | --- |
-| `robot_state_publisher` | 根据 Xacro 发布机器人固定关节 TF | `/robot_description` | `/tf_static` |
-| `m1_gazebo_bridge_core` | ROS–Gazebo 非扫描 bridge | `/cmd_vel`、障碍物速度命令 | `/ground_truth/odom`、`/clock`、`/ground_truth/tf`、`/world/m1/set_pose` |
-| `m1_gazebo_bridge_dual_scan` | 原生双 GPU 激光 bridge | Gazebo `/scan_front`、`/scan_rear` | ROS 同名 LaserScan |
-| `m1_dual_laser_merger` | 将两束半周扫描合成统一扫描 | `/scan_front`、`/scan_rear` | `/scan`、`/scan_merged_cloud` |
-| `software_lidar` | 确定性软件激光 fallback | `/ground_truth/odom`、障碍物真值 | `/sim_scan` |
-| `scan_relay` | 软件激光时统一接口 | `/sim_scan` | `/scan` |
-| `odom_slip_simulator` | 生成给控制器使用的里程计和动态 TF | `/ground_truth/odom` | `/odom`、`odom → base_footprint` |
-| `dynamic_obstacle_mover` | 驱动或停放三个位移障碍物 | `/world/m1/set_pose` | `/m1/dynamic_obstacles`、各模型 `/cmd_vel` |
+[打开 SVG](architecture/01_common_simulation.svg)
 
-关键公共 Topic：
+![公共仿真 ROS 图](architecture/01_common_simulation.svg)
 
-| Topic | 类型 | 含义 |
+### 公共节点
+
+| 节点 | 责任 | 关键接口 |
 | --- | --- | --- |
-| `/cmd_vel` | `geometry_msgs/Twist` | Gazebo MecanumDrive 的唯一 ROS 控制入口 |
-| `/ground_truth/odom` | `nav_msgs/Odometry` | Gazebo 真实位姿；供软件激光与滑移适配使用 |
-| `/odom` | `nav_msgs/Odometry` | 给导航/局部控制器使用的连续里程计 |
-| `/scan` | `sensor_msgs/LaserScan` | Nav2 和 localized Imperative 的统一激光接口 |
-| `/sim_scan` | `sensor_msgs/LaserScan` | 软件激光原始输出；默认 Imperative 在软件模式直接消费它 |
-| `/tf`、`/tf_static` | `tf2_msgs/TFMessage` | 共同子树为 `odom → base_footprint → base_link → laser_scan_link`；仅 Nav2 与 localized Imperative 额外提供 `map → odom` |
-| `/m1/dynamic_obstacles` | `geometry_msgs/PoseArray` | Gazebo 动态障碍物真值，仅默认 Imperative 的仿真适配使用 |
+| `m1_gazebo_bridge_core` | ROS ↔ Gazebo 核心桥 | `/cmd_vel` 到 Gazebo；真值、时钟、动态 TF 回 ROS |
+| `odom_slip_simulator` | 模拟带误差的里程计 | `/ground_truth/odom → /odom`，广播 `odom → base_footprint` |
+| `robot_state_publisher` | 发布固定机身 TF | launch 参数 `robot_description` → `/tf_static`；不是订阅 `/robot_description` |
+| `m1_gazebo_bridge_dual_scan` | 原生 GPU 前/后雷达桥 | Gazebo → `/scan_front`、`/scan_rear` |
+| `m1_dual_laser_merger` | 合并双雷达 | `/scan_front` + `/scan_rear → /scan`，也发布 `/scan_merged_cloud` |
+| `dynamic_obstacle_mover` | 驱动并公布动态障碍物 | `/m1/gazebo_dynamic_tf → /model/moving_obstacle_{1,2,3}/cmd_vel` 与 `/m1/dynamic_obstacles` |
+| `software_lidar`、`scan_relay` | 仅 `software_lidar:=true` 的替代扫描链 | 真值 → `/sim_scan → /scan` |
 
-主要 launch 参数：`software_lidar`（默认 `false`）、`render_engine`（`ogre`）、`dual_gpu_lidar`（`true`）、GPU LiDAR 水平视场 `[-π, π]`、`dynamic_obstacles`、`dynamic_seed`、`dynamic_motion_mode`，以及滑移的 profile、缩放、偏置、噪声和 burst 参数。`/world/m1/set_pose` 是 Gazebo 的 `ros_gz_interfaces/SetEntityPose` Service。
+### 公共接口
 
-## 3. Nav2 MPPI 仿真
+| 接口 | 类型 | 生产者 → 消费者 | 含义 |
+| --- | --- | --- | --- |
+| `/ground_truth/odom` | Topic | core bridge → slip simulator | Gazebo 真值，不是普通控制里程计 |
+| `/odom` | Topic | slip simulator → 控制/定位 | 可配置滑移/噪声后的里程计 |
+| `/scan_front`、`/scan_rear` | Topic | 双雷达 bridge → merger | 原生双 GPU LiDAR 的两路扫描 |
+| `/scan` | Topic | merger → 三种算法的通用消费者 | 项目标准扫描接口 |
+| `/sim_scan` | Topic | `software_lidar` → 默认 Imperative/relay | 软件 LiDAR 特例；默认 Imperative 软件模式不经 relay 读取它 |
+| `/cmd_vel` | Topic | 最后控制/看门狗 → core bridge | **底盘最终速度** |
+| `odom → base_footprint` | TF | slip simulator | 局部控制和 costmap 的位姿链 |
+| `base_footprint` 以下 | TF | robot state publisher | 机身与传感器固定子树 |
+| `/world/m1/set_pose` | Service | mover 客户端 → bridge → Gazebo | 仅停放障碍物时调用；不是 Topic |
 
-```mermaid
-flowchart LR
-  S[/scan/] --> AMCL[AMCL]
-  S --> LC[local_costmap]
-  S --> GC[global_costmap]
-  AMCL --> TF[map→odom]
-  MAP[map_server] --> AMCL
-  Goal[NavigateToPose] --> BT[bt_navigator]
-  BT --> Plan[planner_server: NavFn]
-  Plan --> MPPI[controller_server: MPPI Omni]
-  O[/odom/] --> MPPI
-  LC --> MPPI
-  MPPI --> N[/cmd_vel_nav/]
-  Beh[behavior_server] --> N
-  N --> VS[velocity_smoother]
-  VS --> SM[/cmd_vel_smoothed/]
-  SM --> CM[collision_monitor]
-  CM --> RAW[/m1/cmd_vel_raw/]
-  RAW --> WD[m1_cmd_watchdog]
-  WD --> CMD[/cmd_vel/]
-```
+最影响拓扑的公共 launch 参数是 `software_lidar`、`dual_gpu_lidar`、`render_engine`、`gpu_lidar_min_angle/max_angle`、`dynamic_obstacles`、`dynamic_seed`、`dynamic_motion_mode`。`slip_*`、比例/偏置/噪声与 burst 参数只改变 `/odom` 的数值，不增加算法节点。
+
+## 图 2：Nav2 MPPI
+
+[主 ROS 图](architecture/02_nav2_mppi_ros.svg) · [进程内算法图](architecture/02_nav2_mppi_internal.svg)
+
+![Nav2 MPPI 主 ROS 图](architecture/02_nav2_mppi_ros.svg)
+
+![Nav2 MPPI 进程内算法图](architecture/02_nav2_mppi_internal.svg)
+
+读法：目标 Action 先进入 `bt_navigator`；它调用 `planner_server` 的 NavFn Action，拿到 Path 结果后作为 `FollowPath` 的 Action goal 交给 `controller_server` 中的 MPPI 跟踪。`/plan` 是 planner 另外发布、用于观察的 Path Topic，不是 `FollowPath` 的 ROS Topic 输入。`behavior_server` 的恢复动作和 MPPI 正常速度都汇入 `/cmd_vel_nav`，因此共同经过平滑、碰撞门和最终 watchdog。
 
 ### 节点与生命周期
 
-`lifecycle_manager_localization` 管理 `map_server` 和 `amcl`；`lifecycle_manager_navigation` 管理 controller、planner、behavior、BT navigator 和 waypoint follower；`lifecycle_manager_safety` 管理 velocity smoother 与 collision monitor。导航生命周期延后启动，等待 `/odom` 和 `map → odom` 可用。
+| 组 | 节点 | 责任 |
+| --- | --- | --- |
+| `lifecycle_manager_localization` | `map_server`、`amcl` | 静态地图与定位 |
+| `lifecycle_manager_navigation` | `controller_server`、`planner_server`、`behavior_server`、`bt_navigator`、`waypoint_follower` | 目标、规划、路径跟踪、恢复、多路点 |
+| `lifecycle_manager_safety` | `velocity_smoother`、`collision_monitor` | 平滑与碰撞门 |
+| 独立 | `m1_cmd_watchdog` | raw command 超时后的最终停车 |
 
-| 节点 | 核心作用 |
+| 节点 | 主要输入 | 主要输出/职责 |
+| --- | --- | --- |
+| `amcl` | `/map`、`/scan`、TF | `map → odom`、`/amcl_pose`、粒子云 |
+| `global_costmap/global_costmap` | `/map`、`/scan` | 全局静态/障碍物/膨胀代价地图 |
+| `local_costmap/local_costmap` | `/scan`、`/odom` | 滚动局部代价地图 |
+| `planner_server` | 全局 costmap、`ComputePath*` Action | NavFn Action result；另发布观察用 `/plan` |
+| `controller_server` | `FollowPath`、局部 costmap、`/odom` | MPPI `/cmd_vel_nav`、轨迹可视化 |
+| `behavior_server` | 恢复 Action、局部 costmap | 同样写 `/cmd_vel_nav` |
+| `velocity_smoother` | `/cmd_vel_nav`、`/odom` | `/cmd_vel_smoothed` |
+| `collision_monitor` | `/cmd_vel_smoothed`、`/scan`、TF | `/m1/cmd_vel_raw`；源码当前只配置 `PolygonStop` |
+
+### 主要 Topic、Action、Service
+
+| 接口 | 节点/角色 | 说明 |
+| --- | --- | --- |
+| `/map` | `map_server` → AMCL/global costmap | 静态占据栅格 |
+| `/scan` | 图 1 merger → AMCL/costmap/collision monitor | 共同障碍物观测 |
+| `/plan` | planner → RViz/观测者 | NavFn 发布的观察用全局路径；真正交给 `FollowPath` 的 Path 在 Action goal 中 |
+| `/cmd_vel_nav` | controller、behavior → smoother | 正常和恢复动作的合流点 |
+| `/cmd_vel_smoothed` | smoother → collision monitor | 平滑后、尚未最终放行 |
+| `/m1/cmd_vel_raw` | collision monitor → watchdog | 碰撞门后的速度 |
+| `/navigate_to_pose`、`/navigate_through_poses` | `bt_navigator` Action | 导航入口 |
+| `/compute_path_to_pose`、`/compute_path_through_poses` | planner Action | 全局路径计算 |
+| `/follow_path`、`/follow_waypoints` | controller/waypoint Action | 路径与路点执行 |
+| `/spin`、`/backup`、`/drive_on_heading`、`/assisted_teleop`、`/wait` | behavior Action | 恢复行为 |
+| `.../manage_nodes` | lifecycle manager **对外提供**的 Service | 外部请求配置/激活生命周期组；manager 再调用各受管节点自己的状态迁移 Service；不传递速度 |
+
+每个 lifecycle node 也有标准状态迁移 Service；各节点自动参数 Service 不在业务接口表逐个列出。
+
+### MPPI/安全关键参数
+
+| 区域 | 参数 | 当前配置/含义 |
+| --- | --- | --- |
+| AMCL | `global_frame_id / odom_frame_id / base_frame_id` | `map / odom / base_footprint`；`OmniMotionModel`，`tf_broadcast: true` |
+| NavFn | `GridBased.plugin` | `nav2_navfn_planner/NavfnPlanner`，`tolerance: 0.10` |
+| MPPI | `motion_model, time_steps, model_dt, batch_size` | `Omni, 40, 0.05 s, 500`；采样纵向、横向、角速度 |
+| MPPI | `vx_std/vy_std/wz_std`、`vx_max/vy_max/wz_max` | `0.3/0.3/0.5`；`0.5/0.5/0.8` |
+| MPPI | `critics` | Constraint、Cost、Goal、GoalAngle、PathAlign、PathFollow、PathAngle、PreferForward、Twirling |
+| costmap | global/local 的 `global_frame` | 分别是 `map` 与 `odom`，obstacle layer 都订阅 `/scan` |
+| safety | `smoothing_frequency`、碰撞输入/输出 | 20 Hz；`/cmd_vel_smoothed → /m1/cmd_vel_raw` |
+| watchdog | `watchdog_timeout/publish_rate` | 0.40 s / 20 Hz |
+| launch | `navigation_start_delay` | 默认 35 s；等待 `/odom` 和 AMCL TF 再激活导航组 |
+
+## 图 3：默认 Imperative
+
+[主 ROS 图](architecture/03_imperative_default_ros.svg) · [进程内算法图](architecture/03_imperative_default_internal.svg)
+
+![默认 Imperative 主 ROS 图](architecture/03_imperative_default_ros.svg)
+
+![默认 Imperative 进程内算法图](architecture/03_imperative_default_internal.svg)
+
+这条链最短：`imperative_controller` 读取扫描、`/odom` 和固定 launch 目标，**直接**发 `/cmd_vel`。它没有 Map、AMCL、Nav2 Action、业务 Service、TF listener 或独立 watchdog；不要把它误读成“也会经过 Nav2 安全链”。
+
+| 节点/接口 | 责任 |
 | --- | --- |
-| `map_server`、`amcl` | 发布静态地图，并用 `/scan` + `/odom` 估计 `map → odom` |
-| `planner_server` | `NavfnPlanner` 在 global costmap 生成全局路径 |
-| `controller_server` | `MPPIController` 跟踪路径，输出 `/cmd_vel_nav` |
-| `local_costmap`、`global_costmap` | 分别维护 odom 局部滚动代价地图和 map 全局代价地图 |
-| `behavior_server` | Spin、Backup、DriveOnHeading、AssistedTeleop、Wait 恢复行为；也输出 `/cmd_vel_nav` |
-| `bt_navigator`、`waypoint_follower` | 接受导航 Action，编排 planner、controller、恢复行为和路点 |
-| `velocity_smoother` | 闭环速度/加速度限制，输出 `/cmd_vel_smoothed` |
-| `collision_monitor` | 用 `/scan` 对速度多边形进行 slowdown 或 stop，输出 `/m1/cmd_vel_raw` |
-| `m1_cmd_watchdog` | 原始速度超时后发布零速度；唯一最终 `/cmd_vel` 发布者 |
+| `imperative_controller` | `controller_node.py` 的 ROS 适配层；发布命令、路径和轨迹 Marker |
+| `/scan` / `/sim_scan` | 原生 / 软件 LiDAR 的控制器输入；软件模式时控制器直接用 `/sim_scan` |
+| `/odom` | 位置、朝向、速度输入 |
+| `/m1/dynamic_obstacles` | 始终订阅的仿真真值辅助；仅 GPU `/scan` 饱和回退且 `require_dynamic_obstacles=true` 时才作为“必须新鲜”的停车门 |
+| `/cmd_vel` | 直接通向 core bridge 的输出 |
+| `/imperative/planned_path`、`/imperative/tracks` | RViz/观测用途，不参与底盘命令 |
 
-### Action 与 Service
-
-运行时 Action：`/navigate_to_pose`、`/navigate_through_poses`、`/compute_path_to_pose`、`/compute_path_through_poses`、`/follow_path`、`/follow_waypoints`、`/spin`、`/backup`、`/drive_on_heading`、`/assisted_teleop`、`/wait`。
-
-| Service 类别 | 代表接口 | 作用 |
-| --- | --- | --- |
-| 地图 | `/map_server/load_map`、`/map_server/map` | 装载/读取静态地图 |
-| AMCL | `/set_initial_pose`、`/reinitialize_global_localization`、`/request_nomotion_update` | 初始化或重置粒子定位 |
-| Costmap | `clear_*_costmap`、`get_costmap` | 清理障碍层、读取局部/全局地图 |
-| 生命周期 | 各节点 `/change_state`、`/get_state`，manager `/manage_nodes` | 配置、激活和检查 Nav2 节点 |
-| 参数 | 每个 ROS 节点的 `get/list/set_parameters` | 运行时读取或修改已声明参数 |
-
-### 关键有效参数
-
-| 子系统 | 参数 | 当前值与意义 |
-| --- | --- | --- |
-| AMCL | `global_frame_id/odom_frame_id/base_frame_id` | `map` / `odom` / `base_footprint` |
-| AMCL | `transform_tolerance` | `0.5 s`；TF 可带提前时间戳 |
-| MPPI | `motion_model` | `Omni`，采样 M1 的 x/y/yaw 速度 |
-| MPPI | `time_steps × model_dt` | `40 × 0.05 s = 2.0 s` 预测窗 |
-| MPPI | `batch_size`、`iteration_count` | `500`、`1` |
-| MPPI | `vx/vy/wz` 约束 | x 为 ±0.5 m/s，y 上限 0.5 m/s，yaw 上限 0.8 rad/s |
-| MPPI | 标准差 | `vx/vy/wz = 0.3/0.3/0.5` |
-| local costmap | frame、尺寸、分辨率 | `odom`、5×5 m、0.05 m，rolling window |
-| local costmap | 更新/发布 | 10 Hz / 请求 20 Hz 完整快照 |
-| velocity smoother | 频率、速度、加速度 | 20 Hz；最大 `[0.5,0.5,0.8]`；最大加速度 `[0.8,0.8,1.0]` |
-| collision monitor | 多边形 | Slow 0.50×0.40 m、缩放 0.40；Stop 0.30×0.25 m |
-| watchdog | timeout / rate | 0.40 s / 20 Hz |
-
-## 4. 默认 Imperative 仿真
-
-```mermaid
-flowchart LR
-  Scan[/scan 或 /sim_scan/] --> C[imperative_controller]
-  Odom[/odom/] --> C
-  Truth[/m1/dynamic_obstacles/] --> C
-  Goal[launch: goal_x, goal_y] --> C
-  C --> Cluster[相邻回波聚类]
-  Cluster --> KF[常速度 Kalman: x,y,vx,vy]
-  KF --> Rollout[20步候选轨迹与碰撞代价]
-  Rollout --> CMD[/cmd_vel/]
-  C --> Path[/imperative/planned_path/]
-  C --> Tracks[/imperative/tracks/]
-```
-
-`imperative_controller` 没有 Action server，也不订阅 RViz 的 `2D Goal Pose`。它的目标在启动时由 `goal_x=2.5`、`goal_y=1.5` 固定，局部状态和目标都在 `odom` 中解释。
-
-算法先将相邻激光回波聚为检测点簇，再用常速度 Kalman 状态 `[x,y,vx,vy]` 关联和预测障碍物。控制周期 0.1 s，默认 20 步约 2 s 预测窗；每周期在候选航向和速度中选择满足间隙约束且代价较低的速度。它不是学习式策略。
-
-| 输入/输出 | 类型 | 说明 |
-| --- | --- | --- |
-| `/scan` 或 `/sim_scan` | `LaserScan` | 原生模式用 `/scan`；软件模式直接用 `/sim_scan` |
-| `/odom` | `Odometry` | 局部位置、朝向和速度 |
-| `/m1/dynamic_obstacles` | `PoseArray` | 仅 Gazebo 真值 fallback；非仿真接口 |
-| `/cmd_vel` | `Twist` | 直接驱动 Gazebo；默认入口不使用 watchdog |
-| `/imperative/planned_path` | `nav_msgs/Path` | 当前滚动轨迹可视化 |
-| `/imperative/tracks` | `MarkerArray` | 已确认障碍轨迹 |
-
-关键参数：`max_speed=1.0`、`max_acceleration=1.0`、`robot_radius=0.15`、`safety_margin=0.15`、`trajectory_horizon=20`、`trajectory_heading_samples=41`、`trajectory_speed_samples=4`、`dynamic_obstacle_radius=0.20`。节点只提供 ROS 参数 Service；没有导航 Action 或业务 Service。
-
-## 5. localized Imperative 仿真
-
-```mermaid
-flowchart LR
-  Map[map_server] --> AMCL
-  Scan[/scan/] --> AMCL
-  Scan --> C[imperative_m1_controller]
-  Odom[/odom/] --> C
-  AMCL --> TF[map→odom]
-  Goal[launch goal_x, goal_y in map] --> C
-  TF --> C
-  C --> RAW[/imperative/cmd_vel_raw/]
-  RAW --> WD[imperative_localized_cmd_watchdog]
-  WD --> CMD[/cmd_vel/]
-```
-
-这是默认 Imperative 的附加定位变体，不启动 Nav2 planner、costmap、BT 或 collision monitor。`m1_localization.launch.py` 只启动 map server、AMCL 和 localization lifecycle。局部位置、激光点、Kalman track、预测轨迹和绕障始终保留在连续的 `odom`；控制器每个周期读取最新 `odom ← map`，将 map 目标转换到 odom 后规划。
-
-| 项目 | 当前配置 |
+| 参数类别 | 关键参数 |
 | --- | --- |
-| 目标 | `goal_x/goal_y` 在 `map` 中；不支持 RViz 动态改目标 |
-| 默认运动开关 | `enabled=false`，只规划并发布零原始速度；仿真运动需显式 `enabled:=true` |
-| 速度边界 | `max_speed=0.18` m/s、`max_acceleration=0.25` m/s² |
-| 数据路径 | `/scan`、`/odom`、`map → odom` → `/imperative/cmd_vel_raw` → watchdog → `/cmd_vel` |
-| TF 安全门 | `global_tf_max_age=0.5 s`；Gazebo 入口 `global_tf_future_tolerance=0.5 s` |
-| 异常行为 | scan、odom、laser TF、map TF 缺失/过期/超容差时发布零速度，不复用旧目标 |
+| 目标/周期 | `goal_x=2.5`、`goal_y=1.5`、`control_period=0.1` |
+| 速度/几何 | `max_speed=1.0`、`max_acceleration=1.0`、`robot_radius=0.15`、`safety_margin=0.15` |
+| rollout | `trajectory_horizon=20`、`trajectory_heading_samples=41`、`trajectory_speed_samples=4` |
+| 接口 | 原生 `scan_topic=/scan`，软件 `scan_topic=/sim_scan`，launch 强制 `command_topic=/cmd_vel` |
+| 动态/退化 | `dynamic_obstacle_radius=0.20`、`dynamic_obstacle_timeout=0.5`；GPU 扫描饱和时只允许配置的静态障碍物和新鲜仿真真值辅助 |
 
-AMCL 的 `transform_tolerance=0.5 s` 会合法地提前标记 `map → odom`。控制器只在 localized Gazebo 入口接受最多 0.5 s 的提前量；共享节点默认仍是 0，避免本轮未经实测地改变实机行为。
+内部算法顺序是“扫描点 → 聚类检测 → 轨迹更新/确认过滤 → 去动态残影的局部地图 → 候选加速度 rollout → 碰撞/目标评分 → Twist”。这些方框不是 ROS 节点，所以不会出现在 rqt_graph。
 
-与默认 Imperative 一样，该控制器没有 Action server；其 Service 仅为标准 ROS 参数 Service。额外发布 `/imperative/obstacle_centers`，用于显示确认的障碍中心。
+## 图 4：定位版 Imperative
 
-## 6. 运行命令与对照规则
+[主 ROS 图](architecture/04_imperative_localized_ros.svg) · [进程内算法图](architecture/04_imperative_localized_internal.svg)
+
+![定位版 Imperative 主 ROS 图](architecture/04_imperative_localized_ros.svg)
+
+![定位版 Imperative 进程内算法图](architecture/04_imperative_localized_internal.svg)
+
+定位版不是“把 Nav2 planner 换成 Imperative”。它只复用 `map_server + AMCL` 给全局坐标约束；`imperative_m1_controller` 仍在 `odom` 坐标中做局部感知与速度选择。每周期将 map 目标用最新 `map → odom` TF 转换；TF 缺失、过期、未来时间不合法，或扫描/里程计/雷达 TF 过期，都会输出零 raw command。
+
+| 节点/接口 | 责任 |
+| --- | --- |
+| `map_server`、`amcl`、`lifecycle_manager_localization` | 与 Nav2 定位组相同；AMCL 发布 `map → odom` |
+| `imperative_m1_controller` | `m1_controller_node.py`；有 TF buffer/listener，订阅 `/scan`、`/odom` |
+| `/imperative/cmd_vel_raw` | 算法原始速度；不直接到 Gazebo |
+| `imperative_localized_cmd_watchdog` | 20 Hz 转发 raw command；超过 0.40 s 未更新就将 `/cmd_vel` 置零 |
+| `/imperative/planned_path`、`/imperative/tracks`、`/imperative/obstacle_centers` | 三个可视化 Topic |
+
+| 参数类别 | 关键参数 |
+| --- | --- |
+| 坐标/目标 | `goal_frame=map`、`global_frame=map`、`odom_frame=odom`；`goal_x/y` 是 map 坐标 |
+| 使能 | `enabled:=false` 默认 dry-run；设为 true 才允许物理命令通过节点 |
+| 全局 TF 门 | `global_tf_max_age=0.5`；仿真 launch 的 `global_tf_future_tolerance=0.5` s |
+| 本地输入门 | `scan_timeout=0.50`、`odom_timeout=0.50`、`tf_max_age=0.30` |
+| 速度/rollout | `max_speed=0.18`、`max_acceleration=0.25`、`robot_radius=0.18`、`safety_margin=0.18`；20/41/4 rollout 采样 |
+
+没有业务 Action server 或业务 Service。TF listener 是进程内 API，不应画成一个订阅 `/tf` 的“算法节点”；自动参数 Service 同样不属于业务接口。
+
+## 三种入口的差异
+
+| 问题 | Nav2 MPPI | 默认 Imperative | 定位版 Imperative |
+| --- | --- | --- | --- |
+| 目标输入 | Action | launch 参数 | map 坐标 launch 参数 |
+| 全局定位 | Map + AMCL | 无 | Map + AMCL，仅供目标变换 |
+| 全局路径 | NavFn Action result（另发布观察用 `/plan`） | 无 | 无 |
+| 局部控制 | MPPI + local costmap | 内部点/轨迹模型 | 内部点/轨迹模型 |
+| 规划坐标 | Nav2 map/odom TF 体系 | odom | odom，map 目标每周期转换 |
+| 最后速度链 | 平滑 + collision + watchdog | 直接 `/cmd_vel` | 独立 watchdog 后 `/cmd_vel` |
+| Action | 完整 Nav2 导航/恢复集合 | 无 | 无 |
+
+## 原始运行时 rqt_graph 附录
+
+以下快照在 2026-09-06 的隔离 ROS domain 中生成。它们不是手工简化图：仓库的 [`tools/export_rqt_graph.py`](../tools/export_rqt_graph.py) 调用 `rqt_graph` Nodes/Topics DOT 生成器，等待 3 秒 DDS 发现稳定，排除导出器自身并隐藏常规噪声。bond、诊断和 Action 子 Topic 仍会保留。
+
+| 入口与条件 | SVG | DOT |
+| --- | --- | --- |
+| Nav2 MPPI；原生双 GPU LiDAR，`software_lidar:=false`，`dynamic_obstacles:=false` | [SVG](architecture/raw/nav2_mppi_native.svg) | [DOT](architecture/raw/nav2_mppi_native.dot) |
+| 默认 Imperative；原生双 GPU LiDAR，`software_lidar:=false`，`dynamic_obstacles:=false` | [SVG](architecture/raw/imperative_default_native.svg) | [DOT](architecture/raw/imperative_default_native.dot) |
+| 定位版 Imperative；原生双 GPU LiDAR，`software_lidar:=false`，`dynamic_obstacles:=false`，`enabled:=false` | [SVG](architecture/raw/imperative_localized_native.svg) | [DOT](architecture/raw/imperative_localized_native.dot) |
+
+复现导出时先 source 当前工作区：
 
 ```bash
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-
-# Nav2 MPPI
-ros2 launch m1_nav2_bringup nav2_m1_gazebo.launch.py gui:=true rviz:=true
-
-# 默认 Imperative
-ros2 launch imperative_navigation imperative_m1_gazebo.launch.py gui:=true rviz:=true
-
-# localized Imperative：先保持干运行，确认环境后才开启 enabled
-ros2 launch imperative_navigation imperative_m1_localized_gazebo.launch.py \
-  gui:=true enabled:=false
+python3 tools/export_rqt_graph.py --output docs/architecture/raw/snapshot.dot
+dot -Tsvg docs/architecture/raw/snapshot.dot -o docs/architecture/raw/snapshot.svg
 ```
 
-公平对照时只启动一个控制器，使用同一世界、同一目标、同一动态障碍 seed 和同一传感器模式。为排除原生 GPU LiDAR 的渲染差异，推荐两边都使用 `software_lidar:=true`；这改变传感器实现，不改变控制器算法。
-
-## 7. 本轮运行时证据与分支差异
-
-2026-09-05 的 headless 隔离运行已确认三套入口的节点、Topic 和 TF 形状：Nav2 在 `navigation_start_delay:=50.0` 后完整进入 active，且 `/cmd_vel_nav` 的发布者均指向平滑器、最终 `/cmd_vel` 只由 watchdog 发布；默认 Imperative 不含 map 并到达启动参数目标；localized Imperative 包含 `map → odom → base_footprint`、AMCL 和 watchdog，`global_tf_future_tolerance=0.5` 生效并到达目标，控制器 SIGINT 后干净退出。运行时检查应始终以 `ros2 node/topic/action/service list`、`ros2 node info`、`ros2 topic info --verbose` 与 `view_frames` 为准，配置文件本身不等于实际 launch 的 install tree。
-
-相对于 `origin/imperative`，当前 `main` 多 7 个提交，分支没有独有提交。差异集中于原生双 OGRE GPU LiDAR、诊断工具、world 与对应 Nav2/support 配置；本文三套算法入口和公共仿真层以当前 `main` 为准。
+原始图是“当时发现到的 ROS endpoint”，而主图和接口表给出系统角色；两者应结合阅读。
