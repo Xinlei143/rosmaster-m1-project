@@ -9,7 +9,12 @@ digraph nav2_mppi_internal {
   navfn [label="NavFn\n搜索全局路径", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
   path [label="参考全局路径", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
   state [label="当前状态\n(/odom + TF)", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
-  costmap_l [label="局部代价地图", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  scan_history [label="/scan 十帧历史", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  scope [label="冻结 SCOPE\n0.5 s prediction + uncertainty\n（默认关闭）", shape=box, style="rounded,filled", fillcolor="#F3E8FF", color="#7E5AA6"];
+  scope_layer [label="ScopeLayer 风险融合\n严格配对 + 旋转投影\n<0.35 透明 / 200 / 254", shape=box, style="rounded,filled", fillcolor="#FFF0E8", color="#C98216"];
+  obstacle_layer [label="ObstacleLayer\n实测扫描标记/清除", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  inflation_layer [label="InflationLayer\n0.4 m 膨胀", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  costmap_l [label="局部代价地图\nmax 组合结果", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
   sampling [label="MPPI 采样 / rollout\n控制序列 + 运动模型", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
   critics [label="critic 评分\nConstraint / Cost / Goal / GoalAngle\nPathAlign / PathFollow / PathAngle\nPreferForward / Twirling", shape=box, style="rounded,filled", fillcolor="#FFF0E8", color="#C98216"];
   optimize [label="加权更新最优控制序列", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
@@ -18,6 +23,13 @@ digraph nav2_mppi_internal {
   goal -> navfn;
   costmap_g -> navfn;
   navfn -> path;
+  scan_history -> obstacle_layer;
+  scan_history -> scope;
+  state -> scope [label="运动补偿"];
+  scope -> scope_layer;
+  obstacle_layer -> scope_layer [label="先保留实测代价"];
+  scope_layer -> inflation_layer [label="max 合并"];
+  inflation_layer -> costmap_l;
   path -> sampling;
   state -> sampling;
   costmap_l -> sampling;
@@ -28,4 +40,6 @@ digraph nav2_mppi_internal {
   optimize -> velocity;
   params -> sampling [style=dashed, color="#7E5AA6"];
   params -> critics [style=dashed, color="#7E5AA6"];
+  fallback [label="SCOPE 超过 0.5 s 未形成完整消息对：\n撤销自身贡献，回退到 obstacle + inflation；\n不把 local costmap 标为 stale", shape=note, style=filled, fillcolor="#F8FAFC", color="#94A3B8"];
+  fallback -> scope_layer [style=dashed, color="#7E5AA6"];
 }

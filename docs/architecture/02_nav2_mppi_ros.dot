@@ -28,7 +28,10 @@ digraph nav2_mppi_ros {
   map_server [label="map_server", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
   amcl [label="amcl\n发布 map → odom TF", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
   global_costmap [label="global_costmap/global_costmap", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
-  local_costmap [label="local_costmap/local_costmap", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  local_costmap [label="local_costmap/local_costmap\nobstacle → SCOPE → inflation", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
+  scope_predictor [label="m1_scope_predictor\n冻结 SCOPE 在线推理\n（scope_enabled，默认关闭）", shape=box, style="rounded,filled", fillcolor="#F3E8FF", color="#7E5AA6"];
+  scope_prediction [label="/scope/prediction", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
+  scope_uncertainty [label="/scope/uncertainty", shape=ellipse, style=filled, fillcolor="#FFF1D6", color="#C98216"];
   behavior [label="behavior_server\nSpin / BackUp / Wait 等恢复", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
   waypoint [label="waypoint_follower\nFollowWaypoints Action", shape=box, style="rounded,filled", fillcolor="#DDEBFA", color="#2F6FAB"];
 
@@ -56,9 +59,15 @@ digraph nav2_mppi_ros {
   scan -> global_costmap;
   scan -> local_costmap;
   scan -> collision;
+  scan -> scope_predictor [label="十帧历史"];
   odom -> controller;
   odom -> local_costmap;
   odom -> global_costmap;
+  odom -> scope_predictor [label="自车运动补偿"];
+  scope_predictor -> scope_prediction;
+  scope_predictor -> scope_uncertainty;
+  scope_prediction -> local_costmap [label="严格配对\n风险增量"];
+  scope_uncertainty -> local_costmap;
   amcl -> controller [label="TF：map → odom", style=dashed, color="#7E5AA6"];
   amcl -> planner [label="TF：map → odom", style=dashed, color="#7E5AA6"];
   global_costmap -> planner [label="全局代价地图"];
@@ -79,5 +88,5 @@ digraph nav2_mppi_ros {
   lifecycle_nav -> controller [style=dashed, color="#7E5AA6", label="调用受管节点的\nChangeState Service"];
   lifecycle_safety -> collision [style=dashed, color="#7E5AA6", label="调用受管节点的\nChangeState Service"];
 
-  note [label="/plan 是 planner 的发布 Topic（用于观察）；\nFollowPath 实际收到的是 BT 在 Action goal 中携带的 Path。\n绿：Action；紫：Service；虚线：TF/生命周期调用。", shape=note, style=filled, fillcolor="#F8FAFC", color="#94A3B8"];
+  note [label="/plan 是 planner 的发布 Topic（用于观察）；\nFollowPath 实际收到的是 BT 在 Action goal 中携带的 Path。\nSCOPE 只增加 local cost；过期时透明撤销且不令 costmap stale。\n绿：Action；紫：Service/可选预测；虚线：TF/生命周期调用。", shape=note, style=filled, fillcolor="#F8FAFC", color="#94A3B8"];
 }
