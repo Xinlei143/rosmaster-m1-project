@@ -190,12 +190,12 @@ controller_server:
         threshold_to_consider: 1.4
       PathAngleCritic:
         enabled: true
-        cost_weight: 2.0
+        cost_weight: 4.0
         offset_from_furthest: 4
         threshold_to_consider: 0.5
       PreferForwardCritic:
         enabled: true
-        cost_weight: 1.0
+        cost_weight: 2.0
       TwirlingCritic:
         enabled: true
         cost_weight: 10.0
@@ -220,7 +220,7 @@ local_costmap:
       resolution: 0.05
       footprint: "[[-0.15,-0.12],[-0.15,0.12],[0.15,0.12],[0.15,-0.12]]"
       footprint_padding: 0.02
-      plugins: [obstacle_layer, inflation_layer]
+      plugins: [obstacle_layer, scope_layer, inflation_layer]
       obstacle_layer:
         plugin: nav2_costmap_2d::ObstacleLayer
         enabled: true
@@ -246,6 +246,17 @@ local_costmap:
           # Keep the default strict: GPU scans are finite in the measured
           # bridge path, so +Inf-as-clearing is not enabled without evidence.
           inf_is_valid: false
+      scope_layer:
+        plugin: m1_scope_costmap_layer::ScopeLayer
+        enabled: false
+        prediction_topic: /scope/prediction
+        uncertainty_topic: /scope/uncertainty
+        low_threshold: 0.35
+        lethal_threshold: 0.60
+        uncertainty_gain: 1.0
+        uncertainty_encoding_scale: 0.5
+        medium_cost: 200
+        stale_timeout: 0.5
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         cost_scaling_factor: 3.0
