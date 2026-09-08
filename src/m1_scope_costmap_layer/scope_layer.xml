@@ -1,0 +1,10 @@
+<library path="m1_scope_costmap_layer">
+  <class
+    name="m1_scope_costmap_layer::ScopeLayer"
+    type="m1_scope_costmap_layer::ScopeLayer"
+    base_class_type="nav2_costmap_2d::Layer">
+    <description>
+      Max-combining Nav2 layer for matched SCOPE prediction and uncertainty grids.
+    </description>
+  </class>
+</library>

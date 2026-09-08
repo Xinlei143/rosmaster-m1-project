@@ -1,13 +1,28 @@
-"""Regression tests for the GPU-LiDAR Nav2 costmap observation settings."""
+"""Regression tests for the M1 Nav2 configuration and launch wiring."""
 
+import importlib.util
 from pathlib import Path
 
 import yaml
+from launch import LaunchContext
+from launch.actions import IncludeLaunchDescription
+from launch.substitutions import LaunchConfiguration
 
 
-PARAMS = Path(__file__).parents[1] / "config" / "nav2_params.yaml"
-GAZEBO_LAUNCH = Path(__file__).parents[1] / "launch" / "nav2_m1_gazebo.launch.py"
+PACKAGE_ROOT = Path(__file__).parents[1]
+PARAMS = PACKAGE_ROOT / "config" / "nav2_params.yaml"
+GAZEBO_LAUNCH = PACKAGE_ROOT / "launch" / "nav2_m1_gazebo.launch.py"
 RVIZ_CONFIG = Path(__file__).parents[1] / "rviz" / "m1_nav2.rviz"
+PACKAGE_XML = PACKAGE_ROOT / "package.xml"
+
+
+def load_gazebo_launch_module():
+    spec = importlib.util.spec_from_file_location(
+        "nav2_m1_gazebo", GAZEBO_LAUNCH
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def costmap_scan_source(costmap_name):
@@ -93,6 +108,104 @@ def test_scope_observer_is_opt_in_and_receives_no_navigation_output_topics():
     assert '"/scope/' not in launch_source
     package_xml = (GAZEBO_LAUNCH.parents[1] / "package.xml").read_text()
     assert "<exec_depend>m1_scope_predictor</exec_depend>" in package_xml
+
+
+def test_scope_costmap_layer_is_local_only_and_precedes_inflation():
+    local = costmap_parameters("local_costmap")
+    global_costmap = costmap_parameters("global_costmap")
+
+    assert local["plugins"] == [
+        "obstacle_layer", "scope_layer", "inflation_layer"
+    ]
+    assert local["inflation_layer"]["inflation_radius"] == 0.4
+    assert local["scope_layer"] == {
+        "plugin": "m1_scope_costmap_layer::ScopeLayer",
+        "enabled": False,
+        "prediction_topic": "/scope/prediction",
+        "uncertainty_topic": "/scope/uncertainty",
+        "low_threshold": 0.35,
+        "lethal_threshold": 0.60,
+        "uncertainty_gain": 1.0,
+        "uncertainty_encoding_scale": 0.5,
+        "medium_cost": 200,
+        "stale_timeout": 0.5,
+    }
+    assert "scope_layer" not in global_costmap["plugins"]
+    assert "scope_layer" not in global_costmap
+
+
+def test_scope_enabled_drives_predictor_and_only_the_local_scope_layer(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("ROS_LOG_DIR", str(tmp_path / "ros-log"))
+    launch_module = load_gazebo_launch_module()
+    package_root = GAZEBO_LAUNCH.parents[1]
+    monkeypatch.setattr(
+        launch_module,
+        "get_package_share_directory",
+        lambda package_name: str(package_root / package_name),
+    )
+
+    launch_description = launch_module.generate_launch_description()
+    scope_includes = [
+        action
+        for action in launch_description.entities
+        if isinstance(action, IncludeLaunchDescription)
+    ]
+    assert len(scope_includes) == 1
+    scope_observer = scope_includes[0]
+
+    original = yaml.safe_load(PARAMS.read_text())
+    for enabled in ("false", "true"):
+        context = LaunchContext()
+        context.launch_configurations.update({
+            "namespace": "",
+            "params_file": str(PARAMS),
+            "scope_enabled": enabled,
+            "use_sim_time": "true",
+        })
+        configured = launch_module._configured_nav2_params(
+            LaunchConfiguration("params_file"),
+            LaunchConfiguration("namespace"),
+            LaunchConfiguration("use_sim_time"),
+            LaunchConfiguration("scope_enabled"),
+        )
+        rewritten_path = configured.evaluate(context)
+        rewritten = yaml.safe_load(rewritten_path.read_text())
+        configured.cleanup()
+
+        assert scope_observer.condition.evaluate(context) is (
+            enabled == "true"
+        )
+        scope_layer = rewritten["local_costmap"]["local_costmap"][
+            "ros__parameters"
+        ]["scope_layer"]
+        assert scope_layer["enabled"] is (enabled == "true")
+
+        expected = yaml.safe_load(PARAMS.read_text())
+        expected["local_costmap"]["local_costmap"]["ros__parameters"][
+            "scope_layer"
+        ]["enabled"] = enabled == "true"
+        for node in expected.values():
+            if isinstance(node, dict) and "ros__parameters" in node:
+                node["ros__parameters"]["use_sim_time"] = True
+            elif isinstance(node, dict):
+                for nested in node.values():
+                    if (
+                        isinstance(nested, dict)
+                        and "ros__parameters" in nested
+                    ):
+                        nested["ros__parameters"]["use_sim_time"] = True
+        assert rewritten == expected
+
+    assert original["local_costmap"]["local_costmap"]["ros__parameters"][
+        "scope_layer"
+    ]["enabled"] is False
+
+
+def test_scope_costmap_layer_is_a_runtime_dependency():
+    package_xml = PACKAGE_XML.read_text()
+    assert "<exec_depend>m1_scope_costmap_layer</exec_depend>" in package_xml
 
 
 def test_gpu_lidar_scan_marks_and_clears_both_costmaps():
@@ -224,9 +337,13 @@ def test_mppi_path_alignment_and_forward_preference_weights():
     follow_path = controller_follow_path()
 
     assert follow_path["PathAlignCritic"]["cost_weight"] == 4.0
+    assert follow_path["PathAngleCritic"]["cost_weight"] == 4.0
     assert follow_path["PreferForwardCritic"]["enabled"] is True
-    assert follow_path["PreferForwardCritic"]["cost_weight"] == 1.0
+    assert follow_path["PreferForwardCritic"]["cost_weight"] == 2.0
     assert follow_path["GoalCritic"]["cost_weight"] == 8.0
+    assert follow_path["GoalAngleCritic"]["cost_weight"] == 3.0
+    assert follow_path["TwirlingCritic"]["cost_weight"] == 10.0
+    assert follow_path["motion_model"] == "Omni"
 
 
 def test_collision_monitor_uses_only_the_stop_polygon():

@@ -15,6 +15,25 @@ from launch_ros.parameter_descriptions import ParameterValue
 from nav2_common.launch import RewrittenYaml
 
 
+def _configured_nav2_params(
+        params_path, namespace, use_sim_time, scope_enabled):
+    return ParameterFile(
+        RewrittenYaml(
+            source_file=params_path,
+            root_key=namespace,
+            param_rewrites={
+                "use_sim_time": use_sim_time,
+                (
+                    "local_costmap.local_costmap.ros__parameters."
+                    "scope_layer.enabled"
+                ): scope_enabled,
+            },
+            convert_types=True,
+        ),
+        allow_substs=True,
+    )
+
+
 def generate_launch_description():
     bringup_share = get_package_share_directory("m1_nav2_bringup")
     support_share = get_package_share_directory("m1_nav2_support")
@@ -29,14 +48,11 @@ def generate_launch_description():
     namespace = LaunchConfiguration("namespace")
     params_path = LaunchConfiguration("params_file")
 
-    configured_params = ParameterFile(
-        RewrittenYaml(
-            source_file=params_path,
-            root_key=namespace,
-            param_rewrites={"use_sim_time": use_sim_time},
-            convert_types=True,
-        ),
-        allow_substs=True,
+    configured_params = _configured_nav2_params(
+        params_path,
+        namespace,
+        use_sim_time,
+        LaunchConfiguration("scope_enabled"),
     )
     localization_params = ParameterFile(
         RewrittenYaml(

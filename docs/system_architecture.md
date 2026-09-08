@@ -70,6 +70,10 @@
 
 读法：目标 Action 先进入 `bt_navigator`；它调用 `planner_server` 的 NavFn Action，拿到 Path 结果后作为 `FollowPath` 的 Action goal 交给 `controller_server` 中的 MPPI 跟踪。`/plan` 是 planner 另外发布、用于观察的 Path Topic，不是 `FollowPath` 的 ROS Topic 输入。`behavior_server` 的恢复动作和 MPPI 正常速度都汇入 `/cmd_vel_nav`，因此共同经过平滑、碰撞门和最终 watchdog。
 
+Nav2 Gazebo launch 现在还包含一个**默认关闭、只作用于 local costmap** 的 SCOPE 预测入口。`scope_enabled:=true` 时，`m1_scope_predictor` 从 `/scan` 和 `/odom` 构造十帧历史，以冻结的官方 SCOPE 模型发布 `/scope/prediction` 与 `/scope/uncertainty`；`local_costmap` 进程内的 `m1_scope_costmap_layer::ScopeLayer` 严格配对两张栅格，将 `prediction + uncertainty` 风险转换为增量代价。global costmap、SCOPE 模型和最终速度链都不改变。
+
+具体消息契约与配置见 [SCOPE 在线接入说明](scope_online.md)，实现与闭环测试记录见 [2026-09-07 工作日志](worklogs/2026-09-07_scope_local_costmap_closed_loop.md)。
+
 ### 节点与生命周期
 
 | 组 | 节点 | 责任 |
@@ -78,12 +82,14 @@
 | `lifecycle_manager_navigation` | `controller_server`、`planner_server`、`behavior_server`、`bt_navigator`、`waypoint_follower` | 目标、规划、路径跟踪、恢复、多路点 |
 | `lifecycle_manager_safety` | `velocity_smoother`、`collision_monitor` | 平滑与碰撞门 |
 | 独立 | `m1_cmd_watchdog` | raw command 超时后的最终停车 |
+| 可选独立节点 | `m1_scope_predictor` | SCOPE 在线推理；由 `scope_enabled` 控制，不属于 Nav2 lifecycle 组 |
 
 | 节点 | 主要输入 | 主要输出/职责 |
 | --- | --- | --- |
 | `amcl` | `/map`、`/scan`、TF | `map → odom`、`/amcl_pose`、粒子云 |
 | `global_costmap/global_costmap` | `/map`、`/scan` | 全局静态/障碍物/膨胀代价地图 |
-| `local_costmap/local_costmap` | `/scan`、`/odom` | 滚动局部代价地图 |
+| `m1_scope_predictor`（可选） | `/scan`、`/odom` | 发布 0.5 s SCOPE prediction、uncertainty 和诊断；不发布速度 |
+| `local_costmap/local_costmap` | `/scan`、`/odom`；可选 `/scope/prediction`、`/scope/uncertainty` | 滚动局部代价地图；插件顺序为 obstacle → SCOPE → inflation |
 | `planner_server` | 全局 costmap、`ComputePath*` Action | NavFn Action result；另发布观察用 `/plan` |
 | `controller_server` | `FollowPath`、局部 costmap、`/odom` | MPPI `/cmd_vel_nav`、轨迹可视化 |
 | `behavior_server` | 恢复 Action、局部 costmap | 同样写 `/cmd_vel_nav` |
@@ -95,7 +101,10 @@
 | 接口 | 节点/角色 | 说明 |
 | --- | --- | --- |
 | `/map` | `map_server` → AMCL/global costmap | 静态占据栅格 |
-| `/scan` | 图 1 merger → AMCL/costmap/collision monitor | 共同障碍物观测 |
+| `/scan` | 图 1 merger → AMCL/costmap/collision monitor；可选 SCOPE predictor | 共同障碍物观测与预测历史输入 |
+| `/scope/prediction` | `m1_scope_predictor` → local `scope_layer` | 0.5 s 未来占据概率栅格；仅 SCOPE 开启时参与 local costmap |
+| `/scope/uncertainty` | `m1_scope_predictor` → local `scope_layer` | 与 prediction 严格同 stamp/几何的标准差编码栅格 |
+| `/scope/diagnostics` | `m1_scope_predictor` → 观测者 | 预热、推理延迟、预测年龄、输出频率和丢弃任务统计 |
 | `/plan` | planner → RViz/观测者 | NavFn 发布的观察用全局路径；真正交给 `FollowPath` 的 Path 在 Action goal 中 |
 | `/cmd_vel_nav` | controller、behavior → smoother | 正常和恢复动作的合流点 |
 | `/cmd_vel_smoothed` | smoother → collision monitor | 平滑后、尚未最终放行 |
@@ -117,10 +126,15 @@
 | MPPI | `motion_model, time_steps, model_dt, batch_size` | `Omni, 40, 0.05 s, 500`；采样纵向、横向、角速度 |
 | MPPI | `vx_std/vy_std/wz_std`、`vx_max/vy_max/wz_max` | `0.3/0.3/0.5`；`0.5/0.5/0.8` |
 | MPPI | `critics` | Constraint、Cost、Goal、GoalAngle、PathAlign、PathFollow、PathAngle、PreferForward、Twirling |
+| MPPI | 朝向偏好 | `PathAngleCritic=4.0`、`PreferForwardCritic=2.0`；`GoalAngleCritic=3.0`、`TwirlingCritic=10.0` |
 | costmap | global/local 的 `global_frame` | 分别是 `map` 与 `odom`，obstacle layer 都订阅 `/scan` |
+| local costmap | 插件顺序 | `obstacle_layer → scope_layer → inflation_layer`；global costmap 不接入 SCOPE |
+| SCOPE layer | 风险映射 | `risk=min(1,prediction+1.0×std)`；`<0.35` 透明、`[0.35,0.60)` 写 200、`>=0.60` 写 254 |
+| SCOPE layer | 失效回退 | 完整消息对超过 0.5 s 即撤销本层贡献，但保持 costmap current，不清除实测障碍 |
 | safety | `smoothing_frequency`、碰撞输入/输出 | 20 Hz；`/cmd_vel_smoothed → /m1/cmd_vel_raw` |
 | watchdog | `watchdog_timeout/publish_rate` | 0.40 s / 20 Hz |
 | launch | `navigation_start_delay` | 默认 35 s；等待 `/odom` 和 AMCL TF 再激活导航组 |
+| launch | `scope_enabled` | 默认 `false`；同时控制 predictor 是否启动和 local `scope_layer.enabled` |
 
 ## 图 3：默认 Imperative
 
@@ -186,14 +200,14 @@
 | 目标输入 | Action | launch 参数 | map 坐标 launch 参数 |
 | 全局定位 | Map + AMCL | 无 | Map + AMCL，仅供目标变换 |
 | 全局路径 | NavFn Action result（另发布观察用 `/plan`） | 无 | 无 |
-| 局部控制 | MPPI + local costmap | 内部点/轨迹模型 | 内部点/轨迹模型 |
+| 局部控制 | MPPI + local costmap；可选 SCOPE 预测增量层 | 内部点/轨迹模型 | 内部点/轨迹模型 |
 | 规划坐标 | Nav2 map/odom TF 体系 | odom | odom，map 目标每周期转换 |
 | 最后速度链 | 平滑 + collision + watchdog | 直接 `/cmd_vel` | 独立 watchdog 后 `/cmd_vel` |
 | Action | 完整 Nav2 导航/恢复集合 | 无 | 无 |
 
 ## 原始运行时 rqt_graph 附录
 
-以下快照在 2026-09-06 的隔离 ROS domain 中生成。它们不是手工简化图：仓库的 [`tools/export_rqt_graph.py`](../tools/export_rqt_graph.py) 调用 `rqt_graph` Nodes/Topics DOT 生成器，等待 3 秒 DDS 发现稳定，排除导出器自身并隐藏常规噪声。bond、诊断和 Action 子 Topic 仍会保留。
+以下快照在 2026-09-06 的隔离 ROS domain 中生成，当时 Nav2 按默认 `scope_enabled:=false` 运行，因此 Nav2 原始图不会出现后来加入的可选 predictor 与 scope layer。它们不是手工简化图：仓库的 [`tools/export_rqt_graph.py`](../tools/export_rqt_graph.py) 调用 `rqt_graph` Nodes/Topics DOT 生成器，等待 3 秒 DDS 发现稳定，排除导出器自身并隐藏常规噪声。bond、诊断和 Action 子 Topic 仍会保留。
 
 | 入口与条件 | SVG | DOT |
 | --- | --- | --- |
